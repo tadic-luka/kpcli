@@ -21,15 +21,34 @@ fn print_dir(group: &keepass::Group) {
     }
 }
 
+fn handle_command(db: Option<&mut Database>, command: &str) {
+    let db = match db {
+        Some(db) => db,
+        None => {
+            eprintln!("Database not opened!");
+            return;
+        }
+    };
+
+    match command {
+        "ls" => {
+            print_dir(&db.root);
+        }
+        _ => {
+            eprintln!("Command not yet supported!");
+        }
+    }
+}
+
 fn main() -> Result<(), DatabaseOpenError> {
     let opts = Opts::parse();
     // Open KeePass database
-    let mut file = File::open(&opts.file)?;
-    let db = Database::open(
-        &mut file,
-        Some(&opts.password), // password
-        None,                 // keyfile
-    )?;
+    let mut file = File::open(&opts.db_file)?;
+
+    let mut db: Option<Database> = match opts.password.as_ref() {
+        Some(password) => Some(Database::open(&mut file, Some(password), None)?),
+        _ => None,
+    };
 
     let mut rl = Editor::<()>::new().unwrap();
     loop {
@@ -37,11 +56,7 @@ fn main() -> Result<(), DatabaseOpenError> {
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
-                if line == "ls" {
-                    print_dir(&db.root);
-                } else {
-                    println!("Invalid command {}", line);
-                }
+                handle_command(db.as_mut(), &line);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");

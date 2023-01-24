@@ -1,32 +1,11 @@
-extern crate keepass;
+mod opt;
 
+use clap::Parser;
 use keepass::{Database, DatabaseOpenError, NodeRef};
+use opt::Opts;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use std::fs::File;
-use std::path::PathBuf;
-
-struct Opts {
-    file: PathBuf,
-    password: String,
-}
-
-impl Opts {
-    fn from_args() -> Self {
-        let mut args = std::env::args().skip(1);
-
-        let file = args.next();
-        let password = args.next();
-        let (file, password) = match (file, password) {
-            (Some(file), Some(password)) => (PathBuf::from(file), password),
-            _ => {
-                println!("Provide db file and password");
-                std::process::exit(1);
-            }
-        };
-        Self { file, password }
-    }
-}
 
 fn print_dir(group: &keepass::Group) {
     for node in &group.children {
@@ -43,7 +22,7 @@ fn print_dir(group: &keepass::Group) {
 }
 
 fn main() -> Result<(), DatabaseOpenError> {
-    let opts = Opts::from_args();
+    let opts = Opts::parse();
     // Open KeePass database
     let mut file = File::open(&opts.file)?;
     let db = Database::open(

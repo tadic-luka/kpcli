@@ -40,7 +40,7 @@ impl Db {
         }
     }
 
-    pub fn go_to_group(&mut self, path: &str) -> bool {
+    pub fn change_current_group(&mut self, path: &str) -> bool {
         if path == ".." || path == "../" {
             self.dir_stack.pop();
             return true;

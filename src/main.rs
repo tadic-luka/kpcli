@@ -58,7 +58,7 @@ fn handle_command<'a>(state: &'a mut State, command: &str) {
             }
         }
         Command::ChangeDir { path } => {
-            match db.go_to_group(&path) {
+            match db.change_current_group(&path) {
                 false => {
                     eprintln!("{} is not a group or doesn't exist!", path);
                 }

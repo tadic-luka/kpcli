@@ -41,24 +41,22 @@ impl Db {
     }
 
     pub fn change_current_group(&mut self, path: &str) -> bool {
-        if path == ".." || path == "../" {
-            self.dir_stack.pop();
-            return true;
-        }
-        let mut new_stack = Vec::with_capacity(path.chars().filter(|&c| c == '/').count());
-        let mut curr_group = self.get_current_group();
+        let previous_stack = self.dir_stack.clone();
         for path in path.split("/") {
-            match self.get_node(curr_group, path) {
+            if path == ".." {
+                self.dir_stack.pop();
+                continue;
+            }
+            match self.get_node(self.get_current_group(), path) {
                 Some(NodeRef::Group(g)) => {
-                    curr_group = g;
-                    new_stack.push(g.uuid.clone());
+                    self.dir_stack.push(g.uuid.clone());
                 }
                 Some(NodeRef::Entry(_)) | None => {
+                    self.dir_stack = previous_stack;
                     return false;
                 }
             }
         }
-        self.dir_stack.append(&mut new_stack);
         true
     }
 

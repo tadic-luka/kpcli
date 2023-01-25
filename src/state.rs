@@ -41,6 +41,10 @@ impl Db {
     }
 
     pub fn go_to_group(&mut self, path: &str) -> bool {
+        if path == ".." || path == "../" {
+            self.dir_stack.pop();
+            return true;
+        }
         let mut new_stack = Vec::with_capacity(path.chars().filter(|&c| c == '/').count());
         let mut curr_group = self.get_current_group();
         for path in path.split("/") {

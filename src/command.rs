@@ -13,6 +13,11 @@ pub enum Command {
         #[arg(default_value_t = String::from(""))]
         path: String,
     },
+    #[command(name = "cd")]
+    ChangeDir {
+        #[arg(default_value_t = String::from(""))]
+        path: String,
+    },
 }
 
 impl Command {

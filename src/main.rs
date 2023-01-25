@@ -50,10 +50,19 @@ fn handle_command<'a>(state: &'a mut State, command: &str) {
     };
     match command {
         Command::ListDir { path } => {
-            if let Some(node) = db.get_node(&db.db.root, &path) {
+            let group = db.get_current_group();
+            if let Some(node) = db.get_node(&group, &path) {
                 print_node(node);
             } else {
                 eprintln!("{} does not exist!", path);
+            }
+        }
+        Command::ChangeDir { path } => {
+            match db.go_to_group(&path) {
+                false => {
+                    eprintln!("{} is not a group or doesn't exist!", path);
+                }
+                true => {}
             }
         }
     }
@@ -73,7 +82,11 @@ fn main() -> Result<(), DatabaseOpenError> {
 
     let mut rl = Editor::<()>::new().unwrap();
     loop {
-        let readline = rl.readline(">> ");
+        let readline = if let Some(db) = &state.db {
+            rl.readline(&format!("{}>> ", db.get_current_group().name))
+        } else {
+            rl.readline(">> ")
+        };
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());

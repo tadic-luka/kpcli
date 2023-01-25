@@ -6,6 +6,8 @@ pub struct State {
 
 pub struct Db {
     pub db: Database,
+    // UUIDs of directory/group stack
+    pub dir_stack: Vec<String>,
 }
 
 impl State {
@@ -18,7 +20,42 @@ impl State {
 
 impl Db {
     fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            dir_stack: Vec::new(),
+        }
+    }
+
+    pub fn find_group(&self, uuid: &str) -> Option<&Group> {
+        self.db.root.iter().find_map(|n| match n {
+            NodeRef::Group(g) if g.uuid == uuid => Some(g),
+            _ => None,
+        })
+    }
+
+    pub fn get_current_group(&self) -> &Group {
+        match self.dir_stack.last() {
+            None => &self.db.root,
+            Some(value) => self.find_group(value).unwrap(),
+        }
+    }
+
+    pub fn go_to_group(&mut self, path: &str) -> bool {
+        let mut new_stack = Vec::with_capacity(path.chars().filter(|&c| c == '/').count());
+        let mut curr_group = self.get_current_group();
+        for path in path.split("/") {
+            match self.get_node(curr_group, path) {
+                Some(NodeRef::Group(g)) => {
+                    curr_group = g;
+                    new_stack.push(g.uuid.clone());
+                }
+                Some(NodeRef::Entry(_)) | None => {
+                    return false;
+                }
+            }
+        }
+        self.dir_stack.append(&mut new_stack);
+        true
     }
 
     // recursively try to get

@@ -73,7 +73,7 @@ fn main() -> Result<(), DatabaseOpenError> {
     // Open KeePass database
     let mut file = File::open(&opts.db_file)?;
 
-    let mut db: Option<Database> = match opts.password.as_ref() {
+    let db: Option<Database> = match opts.password.as_ref() {
         Some(password) => Some(Database::open(&mut file, Some(password), None)?),
         _ => None,
     };

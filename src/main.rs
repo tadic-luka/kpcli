@@ -1,27 +1,69 @@
+mod command;
 mod opt;
 
 use clap::Parser;
-use keepass::{Database, DatabaseOpenError, NodeRef};
+use command::Command;
+use keepass::{Database, DatabaseOpenError, Group, Node, NodeRef};
 use opt::Opts;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use std::fs::File;
 
-fn print_dir(group: &keepass::Group) {
-    for node in &group.children {
-        match node.to_ref() {
-            NodeRef::Group(g) => {
-                println!("{}/", g.name);
+/// recursively try to get given path
+pub fn get<'a>(group: &'a Group, path: &[&str]) -> Option<NodeRef<'a>> {
+    if path.is_empty() {
+        Some(NodeRef::Group(group))
+    } else {
+        if path.len() == 1 {
+            let head = path[0];
+            if head == "." || head == "./" || head == "" {
+                return Some(NodeRef::Group(group));
             }
-            NodeRef::Entry(e) => {
-                let title = e.get_title().unwrap_or("(no title");
-                println!("{}", title);
+            group.children.iter().find_map(|n| match n {
+                Node::Group(g) if g.name == head => Some(n.to_ref()),
+                Node::Entry(e) => {
+                    e.get_title()
+                        .and_then(|t| if t == head { Some(n.to_ref()) } else { None })
+                }
+                _ => None,
+            })
+        } else {
+            let head = path[0];
+            let tail = &path[1..path.len()];
+
+            let head_group = group.children.iter().find_map(|n| match n {
+                Node::Group(g) if g.name == head => Some(g),
+                _ => None,
+            })?;
+
+            get(&head_group, tail)
+        }
+    }
+}
+
+fn print_node<'a>(node: NodeRef<'a>) {
+    match node {
+        NodeRef::Entry(e) => {
+            let title = e.get_title().unwrap_or("(no title");
+            println!("{}", title);
+        }
+        NodeRef::Group(g) => {
+            for node in &g.children {
+                match node.to_ref() {
+                    NodeRef::Group(g) => {
+                        println!("{}/", g.name);
+                    }
+                    NodeRef::Entry(e) => {
+                        let title = e.get_title().unwrap_or("(no title");
+                        println!("{}", title);
+                    }
+                }
             }
         }
     }
 }
 
-fn handle_command(db: Option<&mut Database>, command: &str) {
+fn handle_command<'a>(db: Option<&'a mut Database>, command: &str) {
     let db = match db {
         Some(db) => db,
         None => {
@@ -29,13 +71,22 @@ fn handle_command(db: Option<&mut Database>, command: &str) {
             return;
         }
     };
+    let command = match Command::try_parse(command) {
+        Err(err) => {
+            err.print();
+            return;
+        }
+        Ok(cmd) => cmd,
+    };
 
     match command {
-        "ls" => {
-            print_dir(&db.root);
-        }
-        _ => {
-            eprintln!("Command not yet supported!");
+        Command::ListDir { path } => {
+            let paths: Vec<&str> = path.split("/").collect();
+            if let Some(node) = get(&db.root, &paths) {
+                print_node(node);
+            } else {
+                eprintln!("{} does not exist!", path);
+            }
         }
     }
 }
@@ -55,6 +106,7 @@ fn main() -> Result<(), DatabaseOpenError> {
         let readline = rl.readline(">> ");
         match readline {
             Ok(line) => {
+                println!("{}", line);
                 rl.add_history_entry(line.as_str());
                 handle_command(db.as_mut(), &line);
             }

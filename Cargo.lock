@@ -558,6 +558,7 @@ dependencies = [
  "clap",
  "keepass",
  "rustyline",
+ "shlex",
 ]
 
 [[package]]
@@ -818,6 +819,12 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "shlex"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43b2853a4d09f215c24cc5489c992ce46052d359b5109343cbafbf26bc62f8a3"
 
 [[package]]
 name = "smallvec"

@@ -1,45 +1,15 @@
 mod command;
 mod opt;
+mod state;
 
 use clap::Parser;
 use command::Command;
-use keepass::{Database, DatabaseOpenError, Group, Node, NodeRef};
+use keepass::{Database, DatabaseOpenError, NodeRef};
 use opt::Opts;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
+use state::State;
 use std::fs::File;
-
-/// recursively try to get given path
-pub fn get<'a>(group: &'a Group, path: &[&str]) -> Option<NodeRef<'a>> {
-    if path.is_empty() {
-        Some(NodeRef::Group(group))
-    } else {
-        if path.len() == 1 {
-            let head = path[0];
-            if head == "." || head == "./" || head == "" {
-                return Some(NodeRef::Group(group));
-            }
-            group.children.iter().find_map(|n| match n {
-                Node::Group(g) if g.name == head => Some(n.to_ref()),
-                Node::Entry(e) => {
-                    e.get_title()
-                        .and_then(|t| if t == head { Some(n.to_ref()) } else { None })
-                }
-                _ => None,
-            })
-        } else {
-            let head = path[0];
-            let tail = &path[1..path.len()];
-
-            let head_group = group.children.iter().find_map(|n| match n {
-                Node::Group(g) if g.name == head => Some(g),
-                _ => None,
-            })?;
-
-            get(&head_group, tail)
-        }
-    }
-}
 
 fn print_node<'a>(node: NodeRef<'a>) {
     match node {
@@ -63,8 +33,8 @@ fn print_node<'a>(node: NodeRef<'a>) {
     }
 }
 
-fn handle_command<'a>(db: Option<&'a mut Database>, command: &str) {
-    let db = match db {
+fn handle_command<'a>(state: &'a mut State, command: &str) {
+    let db = match &mut state.db {
         Some(db) => db,
         None => {
             eprintln!("Database not opened!");
@@ -78,11 +48,9 @@ fn handle_command<'a>(db: Option<&'a mut Database>, command: &str) {
         }
         Ok(cmd) => cmd,
     };
-
     match command {
         Command::ListDir { path } => {
-            let paths: Vec<&str> = path.split("/").collect();
-            if let Some(node) = get(&db.root, &paths) {
+            if let Some(node) = db.get_node(&db.db.root, &path) {
                 print_node(node);
             } else {
                 eprintln!("{} does not exist!", path);
@@ -101,13 +69,15 @@ fn main() -> Result<(), DatabaseOpenError> {
         _ => None,
     };
 
+    let mut state = State::new(db);
+
     let mut rl = Editor::<()>::new().unwrap();
     loop {
         let readline = rl.readline(">> ");
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_str());
-                handle_command(db.as_mut(), &line);
+                handle_command(&mut state, &line);
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");

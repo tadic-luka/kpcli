@@ -11,7 +11,7 @@ use rustyline::Editor;
 use state::State;
 use std::fs::File;
 
-fn print_node<'a>(node: NodeRef<'a>) {
+fn list_node<'a>(node: NodeRef<'a>) {
     match node {
         NodeRef::Entry(e) => {
             let title = e.get_title().unwrap_or("(no title");
@@ -52,19 +52,17 @@ fn handle_command<'a>(state: &'a mut State, command: &str) {
         Command::ListDir { path } => {
             let group = db.get_current_group();
             if let Some(node) = db.get_node(&group, &path) {
-                print_node(node);
+                list_node(node);
             } else {
                 eprintln!("{} does not exist!", path);
             }
         }
-        Command::ChangeDir { path } => {
-            match db.change_current_group(&path) {
-                false => {
-                    eprintln!("{} is not a group or doesn't exist!", path);
-                }
-                true => {}
+        Command::ChangeDir { path } => match db.change_current_group(&path) {
+            false => {
+                eprintln!("{} is not a group or doesn't exist!", path);
             }
-        }
+            true => {}
+        },
     }
 }
 

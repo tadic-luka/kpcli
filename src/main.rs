@@ -106,7 +106,6 @@ fn main() -> Result<(), DatabaseOpenError> {
         let readline = rl.readline(">> ");
         match readline {
             Ok(line) => {
-                println!("{}", line);
                 rl.add_history_entry(line.as_str());
                 handle_command(db.as_mut(), &line);
             }
@@ -124,6 +123,5 @@ fn main() -> Result<(), DatabaseOpenError> {
             }
         }
     }
-
     Ok(())
 }

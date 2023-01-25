@@ -4,7 +4,7 @@ mod state;
 
 use clap::Parser;
 use command::Command;
-use keepass::{Database, DatabaseOpenError, NodeRef};
+use keepass::{Database, DatabaseOpenError, NodeRef, Value};
 use opt::Opts;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -29,6 +29,61 @@ fn list_node<'a>(node: NodeRef<'a>) {
                     }
                 }
             }
+        }
+    }
+}
+
+fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool) {
+    const FIELD_NAME_WIDTH: usize = 15;
+
+    fn get_value(val: &Value, show_hidden: bool) -> &str {
+        match val {
+            Value::Bytes(_) => "(bytes)",
+            Value::Unprotected(val) => &val,
+            Value::Protected(val) => {
+                if show_hidden {
+                    let val = std::str::from_utf8(val.unsecure()).unwrap_or("");
+                    val
+                } else {
+                    "*** SECRET ***"
+                }
+            }
+        }
+    }
+
+    match node {
+        NodeRef::Entry(e) => {
+            let title = e
+                .fields
+                .get("Title")
+                .map(|val| get_value(val, show_hidden))
+                .unwrap_or("(no title)");
+            let username = e
+                .fields
+                .get("UserName")
+                .map(|val| get_value(val, show_hidden))
+                .unwrap_or("(no username)");
+            let password = e
+                .fields
+                .get("Password")
+                .map(|val| get_value(val, show_hidden))
+                .unwrap_or("(no password)");
+            println!("{:>FIELD_NAME_WIDTH$}: {}", "Title", title);
+            println!("{:>FIELD_NAME_WIDTH$}: {}", "UserName", username);
+            println!("{:>FIELD_NAME_WIDTH$}: {}", "Password", password);
+
+            for (field_name, field_value) in &e.fields {
+                if field_name != "Title" && field_name != "UserName" && field_name != "Password" {
+                    println!(
+                        "{:>FIELD_NAME_WIDTH$}: {}",
+                        field_name,
+                        get_value(field_value, show_hidden),
+                    );
+                }
+            }
+        }
+        NodeRef::Group(_) => {
+            println!("");
         }
     }
 }
@@ -63,6 +118,14 @@ fn handle_command<'a>(state: &'a mut State, command: &str) {
             }
             true => {}
         },
+        Command::Show { show_hidden, entry } => {
+            let group = db.get_current_group();
+            if let Some(node) = db.get_node(&group, &entry) {
+                print_node(node, show_hidden)
+            } else {
+                eprintln!("{} does not exist!", entry);
+            }
+        }
     }
 }
 

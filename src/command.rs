@@ -18,6 +18,15 @@ pub enum Command {
         #[arg(default_value_t = String::from(""))]
         path: String,
     },
+    /// Show an entry
+    #[command(name = "show")]
+    Show {
+        /// Show hidden values
+        #[arg(short='s')]
+        show_hidden: bool,
+
+        entry: String,
+    },
 }
 
 impl Command {

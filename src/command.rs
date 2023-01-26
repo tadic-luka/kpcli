@@ -22,11 +22,16 @@ pub enum Command {
     #[command(name = "show")]
     Show {
         /// Show hidden values
-        #[arg(short='s')]
+        #[arg(short = 's')]
         show_hidden: bool,
 
         entry: String,
     },
+    /// Copy passwort to clipboard using OSC52
+    /// ANSI escape sequence.
+    /// Not all terminals support this!
+    #[command(name = "cp")]
+    CopyPassword { entry: String },
 }
 
 impl Command {

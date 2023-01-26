@@ -1,49 +1,57 @@
-use clap::{Parser, Subcommand};
+use clap::Parser;
 
 #[derive(Debug, Parser)]
-struct Wrapper {
-    #[command(subcommand)]
-    cmd: Command,
-}
-
-#[derive(Debug, Subcommand)]
+#[command(name = "")]
 pub enum Command {
+    /// List nodes in the group or print entry.
     #[command(name = "ls")]
     ListDir {
         #[arg(default_value_t = String::from(""))]
         path: String,
     },
+    /// Change current group to given one.
     #[command(name = "cd")]
     ChangeDir {
+        // Relative path of group. Must not be entry!
         #[arg(default_value_t = String::from(""))]
         path: String,
     },
-    /// Show an entry
+    /// Show an entry, if it's a group prints nothing.
     #[command(name = "show")]
     Show {
         /// Show hidden values
         #[arg(short = 's')]
         show_hidden: bool,
 
+        /// Relative path to entry.
         entry: String,
     },
     /// Copy password to clipboard using OSC52
     /// ANSI escape sequence.
     /// Not all terminals support this!
     #[command(name = "cp")]
-    CopyPassword { entry: String },
+    CopyPassword {
+        /// Relative path to entry.
+        entry: String,
+    },
 
     /// Copy username to clipboard using OSC52
     /// ANSI escape sequence.
     /// Not all terminals support this!
     #[command(name = "cu")]
-    CopyUsername { entry: String },
+    CopyUsername {
+        /// Relative path to entry.
+        entry: String,
+    },
 
     /// Copy URL (www) to clipboard using OSC52
     /// ANSI escape sequence.
     /// Not all terminals support this!
     #[command(name = "cw")]
-    CopyURL { entry: String },
+    CopyURL {
+        /// Relative path to entry.
+        entry: String,
+    },
 
     /// Clear clipboard using OSC52 ANSI escape sequence.
     /// Not all terminals support this!
@@ -54,7 +62,6 @@ pub enum Command {
 impl Command {
     pub fn try_parse(input: &str) -> Result<Self, clap::Error> {
         let words = shlex::split(input).unwrap_or_else(Vec::new);
-        let wrapper = Wrapper::try_parse_from([String::from("")].into_iter().chain(words))?;
-        Ok(wrapper.cmd)
+        Self::try_parse_from([String::from("")].into_iter().chain(words))
     }
 }

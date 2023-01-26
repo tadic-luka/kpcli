@@ -82,6 +82,9 @@ impl Executor {
                     Some(NodeRef::Entry(e)) => copy_entry_field(e, "URL"),
                 }
             }
+            Command::ClearClipboard => {
+                print_value_as_osc52(&[]);
+            }
         }
     }
 }
@@ -99,7 +102,7 @@ fn print_value_as_osc52(value: &[u8]) {
             print!("\x1b]52;c;{}", b64);
         }
     }
-    println!("Copied to clipboard!");
+    println!("Done!");
 }
 
 fn copy_entry_field<'a>(entry: &'a Entry, field_name: &str) {

@@ -44,6 +44,11 @@ pub enum Command {
     /// Not all terminals support this!
     #[command(name = "cw")]
     CopyURL { entry: String },
+
+    /// Clear clipboard using OSC52 ANSI escape sequence.
+    /// Not all terminals support this!
+    #[command(name = "cx")]
+    ClearClipboard,
 }
 
 impl Command {

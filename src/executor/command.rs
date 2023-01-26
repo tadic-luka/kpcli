@@ -38,6 +38,12 @@ pub enum Command {
     /// Not all terminals support this!
     #[command(name = "cu")]
     CopyUsername { entry: String },
+
+    /// Copy URL (www) to clipboard using OSC52
+    /// ANSI escape sequence.
+    /// Not all terminals support this!
+    #[command(name = "cw")]
+    CopyURL { entry: String },
 }
 
 impl Command {

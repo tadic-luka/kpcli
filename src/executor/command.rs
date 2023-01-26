@@ -27,7 +27,7 @@ pub enum Command {
 
         entry: String,
     },
-    /// Copy passwort to clipboard using OSC52
+    /// Copy password to clipboard using OSC52
     /// ANSI escape sequence.
     /// Not all terminals support this!
     #[command(name = "cp")]

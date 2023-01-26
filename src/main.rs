@@ -21,6 +21,11 @@ fn main() -> Result<(), DatabaseOpenError> {
 
     let mut executor = Executor::new(db);
 
+    if let Some(cmd) = opts.command {
+        executor.execute(cmd);
+        return Ok(());
+    }
+
     let mut rl = Editor::<()>::new().unwrap();
     loop {
         let readline = if let Some(curr_group) = &executor.get_current_group_name() {

@@ -1,3 +1,4 @@
+use crate::executor::Command;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -6,6 +7,11 @@ use std::path::PathBuf;
 pub struct Opts {
     #[arg(long)]
     pub db_file: PathBuf,
+
     #[arg(short, long, env = "DB_PASSWORD")]
     pub password: Option<String>,
+
+    /// Optionally run single command and exit (no interactive session).
+    #[command(subcommand)]
+    pub command: Option<Command>,
 }

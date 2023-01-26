@@ -64,6 +64,15 @@ impl Executor {
                     Some(NodeRef::Entry(e)) => copy_entry_field(e, "Password"),
                 }
             }
+            Command::CopyUsername { entry } => {
+                let group = db.get_current_group();
+                match db.get_node(&group, &entry) {
+                    Some(NodeRef::Group(_)) | None => {
+                        eprintln!("{} is not a group or doesn't exist!", entry);
+                    }
+                    Some(NodeRef::Entry(e)) => copy_entry_field(e, "UserName"),
+                }
+            }
         }
     }
 }

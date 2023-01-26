@@ -61,7 +61,7 @@ impl Executor {
                     Some(NodeRef::Group(_)) | None => {
                         eprintln!("{} is not a group or doesn't exist!", entry);
                     }
-                    Some(NodeRef::Entry(e)) => copy_password(e),
+                    Some(NodeRef::Entry(e)) => copy_entry_field(e, "Password"),
                 }
             }
         }
@@ -70,9 +70,9 @@ impl Executor {
 
 /// This uses OSC52 terminal escape command
 /// which makes terminal emulator to copy data to system clipboard
-fn print_password_as_osc52(password: &[u8]) {
+fn print_value_as_osc52(value: &[u8]) {
     use base64::{engine::general_purpose, Engine as _};
-    let b64 = general_purpose::STANDARD.encode(password);
+    let b64 = general_purpose::STANDARD.encode(value);
     match std::env::var("TMUX") {
         Ok(_) => {
             print!("\x1bPtmux;\x1b\x1b]52;c;{}\x1b\x5c", b64);
@@ -81,22 +81,22 @@ fn print_password_as_osc52(password: &[u8]) {
             print!("\x1b]52;c;{}", b64);
         }
     }
-    println!("Password copied to clipboard");
+    println!("Copied to clipboard!");
 }
 
-fn copy_password<'a>(entry: &'a Entry) {
-    match entry.fields.get("Password") {
-        Some(Value::Unprotected(pass)) => {
-            print_password_as_osc52(pass.as_bytes());
+fn copy_entry_field<'a>(entry: &'a Entry, field_name: &str) {
+    match entry.fields.get(field_name) {
+        Some(Value::Unprotected(value)) => {
+            print_value_as_osc52(value.as_bytes());
         }
-        Some(Value::Protected(pass)) => {
-            print_password_as_osc52(pass.unsecure());
+        Some(Value::Protected(value)) => {
+            print_value_as_osc52(value.unsecure());
         }
-        Some(Value::Bytes(pass)) => {
-            print_password_as_osc52(&pass);
+        Some(Value::Bytes(value)) => {
+            print_value_as_osc52(&value);
         }
         None => {
-            eprintln!("Password is not set!");
+            eprintln!("{} is not set!", field_name);
         }
     }
 }

@@ -26,6 +26,9 @@ fn main() -> Result<(), DatabaseOpenError> {
         return Ok(());
     }
 
+    println!("\nType 'help' for a description of available commands.");
+    println!("Type 'help <command>' for details on individual commands.\n");
+
     let mut rl = Editor::<()>::new().unwrap();
     loop {
         let readline = if let Some(curr_group) = &executor.get_current_group_name() {

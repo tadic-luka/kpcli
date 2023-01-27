@@ -1,7 +1,7 @@
 use clap::Parser;
 
 #[derive(Debug, Parser)]
-#[command(name = "")]
+#[command(help_template("{tab}{subcommands}"))]
 pub enum Command {
     /// List nodes in the group or print entry.
     #[command(name = "ls")]
@@ -62,6 +62,6 @@ pub enum Command {
 impl Command {
     pub fn try_parse(input: &str) -> Result<Self, clap::Error> {
         let words = shlex::split(input).unwrap_or_else(Vec::new);
-        Self::try_parse_from([String::from("")].into_iter().chain(words))
+        Self::try_parse_from([String::new()].into_iter().chain(words))
     }
 }

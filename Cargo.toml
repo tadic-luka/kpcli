@@ -11,3 +11,5 @@ rustyline = "10.1.0"
 clap = {version = "4.1.3", features = ["derive", "env"]}
 shlex = "1.1.0"
 base64 = "0.21.0"
+fst = "0.4"
+totp-rs = {version = "4.2.0", features = ["otpauth"]}

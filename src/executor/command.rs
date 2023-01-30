@@ -23,6 +23,12 @@ pub enum Command {
         #[arg(short = 's')]
         show_hidden: bool,
 
+        /// Show TOTP if exists.
+        /// Prints error if it doesn't.
+        /// Takes precedence over show_hidden.
+        #[arg(long, short)]
+        totp: bool,
+
         /// Relative path to entry.
         entry: String,
     },

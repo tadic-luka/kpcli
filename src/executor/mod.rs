@@ -4,6 +4,8 @@ mod state;
 pub use command::Command;
 use keepass::{Database, Entry, NodeRef, Value};
 use state::State;
+use totp_rs::TOTP;
+
 
 pub struct Executor {
     state: State,
@@ -47,10 +49,14 @@ impl Executor {
                 }
                 true => {}
             },
-            Command::Show { show_hidden, entry } => {
+            Command::Show {
+                show_hidden,
+                entry,
+                totp,
+            } => {
                 let group = db.get_current_group();
                 if let Some(node) = db.get_node(&group, &entry) {
-                    print_node(node, show_hidden)
+                    print_node(node, show_hidden, totp)
                 } else {
                     eprintln!("{} does not exist!", entry);
                 }
@@ -144,7 +150,28 @@ fn list_node<'a>(node: NodeRef<'a>) {
     }
 }
 
-fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool) {
+fn print_totp(e: &Entry) {
+    let otp = match e.get("otp") {
+        None => {
+            eprintln!("Entry does not have totp!");
+            return;
+        }
+        Some(otp) => otp,
+    };
+    let totp = match TOTP::from_url_unchecked(otp) {
+        Ok(val) => val,
+        Err(err) => {
+            eprintln!("Error generating totp: {}", err);
+            return;
+        }
+    };
+    match totp.generate_current() {
+        Ok(secret) => println!("{}", secret),
+        Err(err) => eprintln!("Error generating totp: {}", err),
+    }
+}
+
+fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool, totp: bool) {
     const FIELD_NAME_WIDTH: usize = 15;
 
     fn get_value(val: &Value, show_hidden: bool) -> &str {
@@ -164,6 +191,10 @@ fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool) {
 
     match node {
         NodeRef::Entry(e) => {
+            if totp {
+                print_totp(e);
+                return;
+            }
             let title = e
                 .fields
                 .get("Title")
@@ -194,7 +225,11 @@ fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool) {
             }
         }
         NodeRef::Group(_) => {
-            println!("");
+            if totp {
+                eprintln!("Can't show totp for group!");
+            } else {
+                println!("");
+            }
         }
     }
 }

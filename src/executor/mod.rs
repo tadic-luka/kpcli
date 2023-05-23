@@ -8,8 +8,6 @@ use keepass::{Database, Entry, NodeRef, Value};
 use state::State;
 use totp_rs::TOTP;
 
-use crate::executor::state::Db;
-
 pub struct Executor {
     state: State,
 }
@@ -123,6 +121,14 @@ impl Executor {
                     .map_err(|err| format!("{}", err))?;
                 self.state = State::new(Some(db));
                 println!("{} successfully opened", path.display());
+                Ok(())
+            }
+            Command::CloseDB => {
+                if self.state.db.is_none() {
+                    return Err(format!("No database opened!"));
+                }
+                println!("Closing database!");
+                self.state = State::new(None);
                 Ok(())
             }
         }

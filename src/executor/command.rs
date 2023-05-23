@@ -75,6 +75,10 @@ pub enum Command {
         // Password for given database
         password: String,
     },
+
+    /// Close currently opened database.
+    #[command(name = "close")]
+    CloseDB,
 }
 
 impl Command {

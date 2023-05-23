@@ -212,6 +212,13 @@ fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool, totp: bool) {
             println!("{:>FIELD_NAME_WIDTH$}: {}", "Password", password);
 
             for (field_name, field_value) in &e.fields {
+                if field_name == "otp" && show_hidden {
+                    let val = match get_totp(e) {
+                        Ok(val) => val,
+                        Err(err) => err,
+                    };
+                    println!("{:>FIELD_NAME_WIDTH$}: {}", "otp code", val);
+                }
                 if field_name != "Title" && field_name != "UserName" && field_name != "Password" {
                     println!(
                         "{:>FIELD_NAME_WIDTH$}: {}",

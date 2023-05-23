@@ -1,10 +1,14 @@
 mod command;
 mod state;
 
+use std::fs::File;
+
 pub use command::Command;
 use keepass::{Database, Entry, NodeRef, Value};
 use state::State;
 use totp_rs::TOTP;
+
+use crate::executor::state::Db;
 
 pub struct Executor {
     state: State,
@@ -24,71 +28,92 @@ impl Executor {
             .map(|db| db.get_current_group().name.as_ref())
     }
 
-    pub fn execute(&mut self, command: Command) {
-        let db = match &mut self.state.db {
-            Some(db) => db,
-            None => {
-                eprintln!("Database not opened!");
-                return;
-            }
-        };
-
+    pub fn execute(&mut self, command: Command) -> Result<(), String> {
         match command {
             Command::ListDir { path } => {
+                let db = self
+                    .state
+                    .db
+                    .as_mut()
+                    .ok_or(format!("Database not opened"))?;
                 let group = db.get_current_group();
                 if let Some(node) = db.get_node(&group, &path) {
-                    list_node(node);
+                    Ok(list_node(node))
                 } else {
-                    eprintln!("{} does not exist!", path);
+                    Err(format!("{} does not exist!", path))
                 }
             }
-            Command::ChangeDir { path } => match db.change_current_group(&path) {
-                false => {
-                    eprintln!("{} is not a group or doesn't exist!", path);
+            Command::ChangeDir { path } => {
+                let db = self
+                    .state
+                    .db
+                    .as_mut()
+                    .ok_or(format!("Database not opened"))?;
+                match db.change_current_group(&path) {
+                    false => Err(format!("{} is not a group or doesn't exist!", path)),
+                    true => Ok(()),
                 }
-                true => {}
-            },
+            }
             Command::Show {
                 show_hidden,
                 entry,
                 totp,
             } => {
+                let db = self
+                    .state
+                    .db
+                    .as_mut()
+                    .ok_or(format!("Database not opened"))?;
                 let group = db.get_current_group();
                 if let Some(node) = db.get_node(&group, &entry) {
-                    print_node(node, show_hidden, totp)
+                    Ok(print_node(node, show_hidden, totp))
                 } else {
-                    eprintln!("{} does not exist!", entry);
+                    Err(format!("{} does not exist!", entry))
                 }
             }
             Command::CopyPassword { entry } => {
+                let db = self
+                    .state
+                    .db
+                    .as_mut()
+                    .ok_or(format!("Database not opened"))?;
                 let group = db.get_current_group();
                 match db.get_node(&group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
-                        eprintln!("{} is not a group or doesn't exist!", entry);
+                        Err(format!("{} is not a group or doesn't exist!", entry))
                     }
-                    Some(NodeRef::Entry(e)) => copy_entry_field(e, "Password"),
+                    Some(NodeRef::Entry(e)) => Ok(copy_entry_field(e, "Password")),
                 }
             }
             Command::CopyUsername { entry } => {
+                let db = self
+                    .state
+                    .db
+                    .as_mut()
+                    .ok_or(format!("Database not opened"))?;
                 let group = db.get_current_group();
                 match db.get_node(&group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
-                        eprintln!("{} is not a group or doesn't exist!", entry);
+                        Err(format!("{} is not a group or doesn't exist!", entry))
                     }
-                    Some(NodeRef::Entry(e)) => copy_entry_field(e, "UserName"),
+                    Some(NodeRef::Entry(e)) => Ok(copy_entry_field(e, "UserName")),
                 }
             }
             Command::CopyURL { entry } => {
+                let db = self
+                    .state
+                    .db
+                    .as_mut()
+                    .ok_or(format!("Database not opened"))?;
                 let group = db.get_current_group();
                 match db.get_node(&group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
-                        eprintln!("{} is not a group or doesn't exist!", entry);
+                        Err(format!("{} is not a group or doesn't exist!", entry))
                     }
-                    Some(NodeRef::Entry(e)) => copy_entry_field(e, "URL"),
+                    Some(NodeRef::Entry(e)) => Ok(copy_entry_field(e, "URL")),
                 }
             }
-            Command::ClearClipboard => {
-                print_value_as_osc52(&[]);
+            Command::ClearClipboard => Ok(print_value_as_osc52(&[])),
             }
         }
     }

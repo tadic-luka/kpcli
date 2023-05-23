@@ -6,7 +6,7 @@ use std::path::PathBuf;
 #[command(author, version, about)]
 pub struct Opts {
     #[arg(long)]
-    pub db_file: PathBuf,
+    pub db_file: Option<PathBuf>,
 
     #[arg(short, long, env = "DB_PASSWORD")]
     pub password: Option<String>,

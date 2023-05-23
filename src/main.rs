@@ -10,32 +10,43 @@ use opt::Opts;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use std::fs::File;
+use std::path::PathBuf;
+
+fn open_db(file: &PathBuf, password: &str) -> Result<Database, DatabaseOpenError> {
+    let mut file = File::open(file)?;
+    Database::open(&mut file, Some(password), None)
+}
 
 fn main() -> Result<(), DatabaseOpenError> {
     let opts = Opts::parse();
 
-    // Open KeePass database
-    let mut file = File::open(&opts.db_file)?;
-
-    let db: Option<Database> = match opts.password.as_ref() {
-        Some(password) => Some(Database::open(&mut file, Some(password), None)?),
-        None => {
-            let mut rl = Editor::new().unwrap();
-            rl.set_helper(Some(PasswordInput));
-            match rl.readline("Enter password: ") {
-                Ok(line) => Some(Database::open(&mut file, Some(&line), None)?),
-                Err(err) => {
-                    eprintln!("Error reading line: {}", err);
-                    return Ok(());
+    // Open KeePass database if file was given in cmdline
+    let db: Option<Database> = if let Some(ref file) = opts.db_file {
+        let password = match opts.password {
+            Some(password) => password,
+            None => {
+                let mut rl = Editor::new().unwrap();
+                rl.set_helper(Some(PasswordInput));
+                match rl.readline("Enter password: ") {
+                    Ok(line) => line,
+                    Err(err) => {
+                        eprintln!("Error reading line: {}", err);
+                        return Ok(());
+                    }
                 }
             }
-        }
+        };
+        Some(open_db(file, &password)?)
+    } else {
+        None
     };
 
     let mut executor = Executor::new(db);
 
     if let Some(cmd) = opts.command {
-        executor.execute(cmd);
+        if let Err(err) = executor.execute(cmd) {
+            eprintln!("{}", err);
+        };
         return Ok(());
     }
 
@@ -59,7 +70,9 @@ fn main() -> Result<(), DatabaseOpenError> {
                     Ok(cmd) => cmd,
                 };
                 rl.add_history_entry(line.as_str());
-                executor.execute(command);
+                if let Err(err) = executor.execute(command) {
+                    eprintln!("{}", err);
+                };
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");

@@ -6,7 +6,6 @@ use keepass::{Database, Entry, NodeRef, Value};
 use state::State;
 use totp_rs::TOTP;
 
-
 pub struct Executor {
     state: State,
 }
@@ -150,24 +149,22 @@ fn list_node<'a>(node: NodeRef<'a>) {
     }
 }
 
+fn get_totp(e: &Entry) -> Result<String, String> {
+    e.get("otp")
+        .ok_or(format!("Entry does not have totp!"))
+        .and_then(|otp| {
+            TOTP::from_url_unchecked(otp).map_err(|err| format!("Error generating totp: {}", err))
+        })
+        .and_then(|totp| {
+            totp.generate_current()
+                .map_err(|err| format!("Error generating totp: {}", err))
+        })
+}
+
 fn print_totp(e: &Entry) {
-    let otp = match e.get("otp") {
-        None => {
-            eprintln!("Entry does not have totp!");
-            return;
-        }
-        Some(otp) => otp,
-    };
-    let totp = match TOTP::from_url_unchecked(otp) {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("Error generating totp: {}", err);
-            return;
-        }
-    };
-    match totp.generate_current() {
-        Ok(secret) => println!("{}", secret),
-        Err(err) => eprintln!("Error generating totp: {}", err),
+    match get_totp(e) {
+        Ok(totp) => println!("{}", totp),
+        Err(err) => eprintln!("{}", err),
     }
 }
 

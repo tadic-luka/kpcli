@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 #[derive(Debug, Parser)]
@@ -63,6 +65,16 @@ pub enum Command {
     /// Not all terminals support this!
     #[command(name = "cx")]
     ClearClipboard,
+
+    /// Open database with given file path and password.
+    /// Not allowed if database is another already opened.
+    #[command(name = "open")]
+    OpenDB {
+        // Absolute or relative path to database
+        path: PathBuf,
+        // Password for given database
+        password: String,
+    },
 }
 
 impl Command {

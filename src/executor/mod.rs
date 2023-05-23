@@ -114,6 +114,16 @@ impl Executor {
                 }
             }
             Command::ClearClipboard => Ok(print_value_as_osc52(&[])),
+            Command::OpenDB { path, password } => {
+                if self.state.db.is_some() {
+                    return Err(format!("Database already opened!"));
+                }
+                let mut file = File::open(&path).map_err(|err| format!("{}", err))?;
+                let db = Database::open(&mut file, Some(&password), None)
+                    .map_err(|err| format!("{}", err))?;
+                self.state = State::new(Some(db));
+                println!("{} successfully opened", path.display());
+                Ok(())
             }
         }
     }

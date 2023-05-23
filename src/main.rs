@@ -1,7 +1,9 @@
+mod editor_helper;
 mod executor;
 mod opt;
 
 use clap::Parser;
+use editor_helper::PasswordInput;
 use executor::{Command, Executor};
 use keepass::{Database, DatabaseOpenError};
 use opt::Opts;
@@ -11,12 +13,23 @@ use std::fs::File;
 
 fn main() -> Result<(), DatabaseOpenError> {
     let opts = Opts::parse();
+
     // Open KeePass database
     let mut file = File::open(&opts.db_file)?;
 
     let db: Option<Database> = match opts.password.as_ref() {
         Some(password) => Some(Database::open(&mut file, Some(password), None)?),
-        _ => None,
+        None => {
+            let mut rl = Editor::new().unwrap();
+            rl.set_helper(Some(PasswordInput));
+            match rl.readline("Enter password: ") {
+                Ok(line) => Some(Database::open(&mut file, Some(&line), None)?),
+                Err(err) => {
+                    eprintln!("Error reading line: {}", err);
+                    return Ok(());
+                }
+            }
+        }
     };
 
     let mut executor = Executor::new(db);

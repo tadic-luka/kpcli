@@ -1,9 +1,12 @@
 mod command;
+mod editor_helper;
 mod state;
 
 use std::fs::File;
 
 pub use command::Command;
+pub use editor_helper::EditorHelper;
+pub use editor_helper::PasswordInput;
 use keepass::{Database, Entry, NodeRef, Value};
 use state::State;
 use totp_rs::TOTP;

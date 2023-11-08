@@ -1,10 +1,8 @@
-mod editor_helper;
 mod executor;
 mod opt;
 
 use clap::Parser;
-use editor_helper::PasswordInput;
-use executor::{Command, Executor};
+use executor::{Command, EditorHelper, Executor, PasswordInput};
 use keepass::{Database, DatabaseOpenError};
 use opt::Opts;
 use rustyline::error::ReadlineError;
@@ -53,7 +51,8 @@ fn main() -> Result<(), DatabaseOpenError> {
     println!("\nType 'help' for a description of available commands.");
     println!("Type 'help <command>' for details on individual commands.\n");
 
-    let mut rl = Editor::<()>::new().unwrap();
+    let mut rl = Editor::new().unwrap();
+    rl.set_helper(Some(EditorHelper::new()));
     loop {
         let readline = if let Some(curr_group) = &executor.get_current_group_name() {
             rl.readline(&format!("{}>> ", curr_group))

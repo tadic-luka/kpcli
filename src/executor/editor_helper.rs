@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use clap::CommandFactory;
 use fst::{automaton::Str, Automaton, IntoStreamer};
@@ -14,6 +15,7 @@ pub struct PasswordInput;
 pub struct EditorHelper {
     cmd_trie: fst::Set<Vec<u8>>,
     cmds: HashMap<String, clap::Command>,
+    flag_to_arg_id: HashMap<String, clap::Id>,
 }
 
 impl EditorHelper {
@@ -31,7 +33,20 @@ impl EditorHelper {
             .map(|subcmd| (subcmd.clone(), cmd.find_subcommand(subcmd).unwrap().clone()))
             .collect();
 
-        Self { cmd_trie, cmds }
+        let mut flag_to_arg_id = HashMap::new();
+        for arg in cmd.get_subcommands().flat_map(clap::Command::get_arguments) {
+            if let Some(long) = arg.get_long() {
+                flag_to_arg_id.insert(long.to_string(), arg.get_id().clone());
+            }
+            if let Some(short) = arg.get_short() {
+                flag_to_arg_id.insert(short.to_string(), arg.get_id().clone());
+            }
+        }
+        Self {
+            cmd_trie,
+            cmds,
+            flag_to_arg_id,
+        }
     }
 
     fn find_cmds_starting_with(&self, word: &str) -> Vec<String> {
@@ -47,6 +62,7 @@ impl EditorHelper {
         cmd: &str,
         prefix: &str,
         is_short: bool,
+        ignore_flags: HashSet<&clap::Id>,
     ) -> Vec<String> {
         let cmd = if let Some(cmd) = self.cmds.get(cmd) {
             cmd
@@ -54,7 +70,9 @@ impl EditorHelper {
             return Vec::new();
         };
 
-        let iter = cmd.get_arguments().filter(|arg| !arg.is_positional());
+        let iter = cmd
+            .get_arguments()
+            .filter(|arg| !arg.is_positional() && !ignore_flags.contains(arg.get_id()));
         if is_short && prefix.is_empty() {
             iter.flat_map(|val| {
                 [
@@ -166,8 +184,20 @@ impl Completer for EditorHelper {
         {
             let is_short = !last.starts_with("--");
             let prefix = last.trim_start_matches("-");
-            // TODO: discard already existing flags/options
-            return Ok((pos, self.find_non_positional_args(cmd, prefix, is_short)));
+            let existing_flags: HashSet<&clap::Id> = if words.len() > 2 {
+                words[1..words.len() - 1]
+                    .into_iter()
+                    .map(String::as_str)
+                    .map(|val| val.trim_start_matches("-"))
+                    .filter_map(|val| self.flag_to_arg_id.get(val))
+                    .collect()
+            } else {
+                HashSet::new()
+            };
+            return Ok((
+                pos,
+                self.find_non_positional_args(cmd, prefix, is_short, existing_flags),
+            ));
         }
 
         let _ = (line, pos, ctx);

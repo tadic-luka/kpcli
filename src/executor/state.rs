@@ -1,4 +1,8 @@
-use keepass::{Database, Group, Node, NodeRef};
+use keepass::{
+    db::{Group, Node, NodeRef},
+    Database,
+};
+use uuid::Uuid;
 
 pub struct State {
     pub db: Option<Db>,
@@ -7,7 +11,7 @@ pub struct State {
 pub struct Db {
     pub db: Database,
     // UUIDs of directory/group stack
-    pub dir_stack: Vec<String>,
+    pub dir_stack: Vec<Uuid>,
 }
 
 impl State {
@@ -26,7 +30,7 @@ impl Db {
         }
     }
 
-    pub fn find_group(&self, uuid: &str) -> Option<&Group> {
+    pub fn find_group(&self, uuid: Uuid) -> Option<&Group> {
         self.db.root.iter().find_map(|n| match n {
             NodeRef::Group(g) if g.uuid == uuid => Some(g),
             _ => None,
@@ -36,7 +40,7 @@ impl Db {
     pub fn get_current_group(&self) -> &Group {
         match self.dir_stack.last() {
             None => &self.db.root,
-            Some(value) => self.find_group(value).unwrap(),
+            Some(value) => self.find_group(*value).unwrap(),
         }
     }
 
@@ -66,10 +70,10 @@ impl Db {
             match path {
                 "" | "./" | "." => Some(NodeRef::Group(group)),
                 _ => group.children.iter().find_map(|n| match n {
-                    Node::Group(g) if g.name == path => Some(n.to_ref()),
+                    Node::Group(g) if g.name == path => Some(n.as_ref()),
                     Node::Entry(e) => {
                         e.get_title()
-                            .and_then(|t| if t == path { Some(n.to_ref()) } else { None })
+                            .and_then(|t| if t == path { Some(n.as_ref()) } else { None })
                     }
                     _ => None,
                 }),

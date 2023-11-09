@@ -3,7 +3,8 @@ mod opt;
 
 use clap::Parser;
 use executor::{Command, EditorHelper, Executor, PasswordInput};
-use keepass::{Database, DatabaseOpenError};
+use keepass::DatabaseKey;
+use keepass::{error::DatabaseOpenError, Database};
 use opt::Opts;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -12,7 +13,7 @@ use std::path::PathBuf;
 
 fn open_db(file: &PathBuf, password: &str) -> Result<Database, DatabaseOpenError> {
     let mut file = File::open(file)?;
-    Database::open(&mut file, Some(password), None)
+    Database::open(&mut file, DatabaseKey::new().with_password(password))
 }
 
 fn main() -> Result<(), DatabaseOpenError> {

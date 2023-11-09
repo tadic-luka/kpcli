@@ -7,7 +7,11 @@ use std::fs::File;
 pub use command::Command;
 pub use editor_helper::EditorHelper;
 pub use editor_helper::PasswordInput;
-use keepass::{Database, Entry, NodeRef, Value};
+use keepass::DatabaseKey;
+use keepass::{
+    db::{Entry, NodeRef, Value},
+    Database,
+};
 use state::State;
 use totp_rs::TOTP;
 
@@ -120,7 +124,7 @@ impl Executor {
                     return Err(format!("Database already opened!"));
                 }
                 let mut file = File::open(&path).map_err(|err| format!("{}", err))?;
-                let db = Database::open(&mut file, Some(&password), None)
+                let db = Database::open(&mut file, DatabaseKey::new().with_password(&password))
                     .map_err(|err| format!("{}", err))?;
                 self.state = State::new(Some(db));
                 println!("{} successfully opened", path.display());
@@ -179,7 +183,7 @@ fn list_node<'a>(node: NodeRef<'a>) {
         }
         NodeRef::Group(g) => {
             for node in &g.children {
-                match node.to_ref() {
+                match node.as_ref() {
                     NodeRef::Group(g) => {
                         println!("{}/", g.name);
                     }

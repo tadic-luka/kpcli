@@ -15,7 +15,7 @@ pub struct PasswordInput;
 pub struct EditorHelper {
     cmd_trie: fst::Set<Vec<u8>>,
     cmds: HashMap<String, clap::Command>,
-    flag_to_arg_id: HashMap<String, clap::Id>,
+    cmd_flags_to_arg: HashMap<String, HashMap<String, clap::Arg>>,
 }
 
 impl EditorHelper {
@@ -33,19 +33,23 @@ impl EditorHelper {
             .map(|subcmd| (subcmd.clone(), cmd.find_subcommand(subcmd).unwrap().clone()))
             .collect();
 
-        let mut flag_to_arg_id = HashMap::new();
-        for arg in cmd.get_subcommands().flat_map(clap::Command::get_arguments) {
-            if let Some(long) = arg.get_long() {
-                flag_to_arg_id.insert(long.to_string(), arg.get_id().clone());
+        let mut cmd_flags_to_arg = HashMap::new();
+        for subcmd in cmd.get_subcommands() {
+            let mut flags_to_arg = HashMap::new();
+            for arg in subcmd.get_arguments() {
+                if let Some(long) = arg.get_long() {
+                    flags_to_arg.insert(long.to_string(), arg.clone());
+                }
+                if let Some(short) = arg.get_short() {
+                    flags_to_arg.insert(short.to_string(), arg.clone());
+                }
             }
-            if let Some(short) = arg.get_short() {
-                flag_to_arg_id.insert(short.to_string(), arg.get_id().clone());
-            }
+            cmd_flags_to_arg.insert(subcmd.get_name().to_string(), flags_to_arg);
         }
         Self {
             cmd_trie,
             cmds,
-            flag_to_arg_id,
+            cmd_flags_to_arg,
         }
     }
 
@@ -184,12 +188,16 @@ impl Completer for EditorHelper {
         {
             let is_short = !last.starts_with("--");
             let prefix = last.trim_start_matches("-");
+            let cmd_flags_to_arg = self.cmd_flags_to_arg.get(cmd);
             let existing_flags: HashSet<&clap::Id> = if words.len() > 2 {
                 words[1..words.len() - 1]
                     .into_iter()
                     .map(String::as_str)
                     .map(|val| val.trim_start_matches("-"))
-                    .filter_map(|val| self.flag_to_arg_id.get(val))
+                    .filter_map(|val| {
+                        cmd_flags_to_arg.and_then(|flags_to_arg| flags_to_arg.get(val))
+                    })
+                    .map(|arg| arg.get_id())
                     .collect()
             } else {
                 HashSet::new()

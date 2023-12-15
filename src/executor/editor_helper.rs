@@ -4,10 +4,14 @@ use std::collections::HashSet;
 
 use clap::CommandFactory;
 use fst::{automaton::Str, Automaton, IntoStreamer};
+use keepass::db::NodeRef;
+use keepass::Database;
 use rustyline::{
     completion::Completer, highlight::Highlighter, hint::Hinter, validate::Validator, Helper,
 };
+use uuid::Uuid;
 
+use crate::executor::get_all_prefixes_under_group;
 use crate::executor::Command;
 
 pub struct PasswordInput;
@@ -16,6 +20,9 @@ pub struct EditorHelper {
     cmd_trie: fst::Set<Vec<u8>>,
     cmds: HashMap<String, clap::Command>,
     cmd_flags_to_arg: HashMap<String, HashMap<String, clap::Arg>>,
+    dir_stack: Vec<Uuid>,
+    db_entries: HashMap<Uuid, fst::Set<Vec<u8>>>,
+    db_root: Uuid,
 }
 
 impl EditorHelper {
@@ -50,7 +57,32 @@ impl EditorHelper {
             cmd_trie,
             cmds,
             cmd_flags_to_arg,
+            dir_stack: Vec::new(),
+            db_entries: HashMap::new(),
+            db_root: Uuid::nil(),
         }
+    }
+
+    pub fn create_db_entries(&mut self, db: &Database) {
+        self.db_entries.clear();
+        self.db_root = db.root.uuid.clone();
+        for node in &db.root {
+            if let NodeRef::Group(g) = node {
+                let mut all_entries = get_all_prefixes_under_group(g);
+                all_entries.sort();
+                let all_entries_trie = fst::Set::from_iter(&all_entries).unwrap();
+                self.db_entries.insert(g.uuid.clone(), all_entries_trie);
+            }
+        }
+    }
+
+    pub fn clear_db(&mut self) {
+        self.dir_stack.clear();
+        self.db_entries.clear();
+    }
+
+    pub fn set_dir_stack(&mut self, dir_stack: Vec<Uuid>) {
+        self.dir_stack = dir_stack;
     }
 
     fn find_cmds_starting_with(&self, word: &str) -> Vec<String> {
@@ -95,6 +127,35 @@ impl EditorHelper {
                 .map(String::from)
                 .collect()
         }
+    }
+
+    fn find_positional_args(&self, cmd: &str, prefix: &str) -> Vec<String> {
+        let cmd = if let Some(cmd) = self.cmds.get(cmd) {
+            cmd
+        } else {
+            return Vec::new();
+        };
+        let mut result = Vec::new();
+        for arg in cmd.get_arguments().filter(|arg| arg.is_positional()) {
+            match arg.get_value_hint() {
+                clap::ValueHint::Other => {
+                    // this is entry in keepass database
+                    // get database entries here
+                    let curr_dir = self.dir_stack.last().unwrap_or(&self.db_root);
+                    let res = self
+                        .db_entries
+                        .get(&curr_dir)
+                        .unwrap()
+                        .search(Str::new(prefix).starts_with())
+                        .into_stream()
+                        .into_strs()
+                        .unwrap();
+                    result.extend(res);
+                }
+                _ => {}
+            }
+        }
+        return result;
     }
 }
 
@@ -155,7 +216,7 @@ impl Completer for EditorHelper {
         &self, // FIXME should be `&mut self`
         line: &str,
         pos: usize,
-        ctx: &rustyline::Context<'_>,
+        _ctx: &rustyline::Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
         if pos == 0 {
             // completing all cmds
@@ -165,17 +226,20 @@ impl Completer for EditorHelper {
             return Ok((0, Vec::new()));
         }
         let words = shlex::split(line).unwrap_or_else(Vec::new);
+        if words.is_empty() {
+            return Ok((0, Vec::new()));
+        }
+        let cmd = &words[0];
         if words.len() == 1 {
             let word = &words[0];
             if pos > word.len() {
                 // TODO: autocomplete positional argument only if needed
                 // don't autocomplete if user is moved from typing command
-                return Ok((0, Vec::new()));
+                return Ok((pos, self.find_positional_args(cmd, "")));
             }
             return Ok((0, self.find_cmds_starting_with(word)));
         }
-        let cmd = &words[0];
-        let last = &words[words.len() - 1];
+        let last = &words[words.len() - 1].trim();
 
         // autocomplete flag/option
         // if user input starts with "-"
@@ -207,15 +271,16 @@ impl Completer for EditorHelper {
                 self.find_non_positional_args(cmd, prefix, is_short, existing_flags),
             ));
         }
-
-        let _ = (line, pos, ctx);
-        Ok((0, Vec::with_capacity(0)))
+        // positional arg
+        let res = self.find_positional_args(cmd, last);
+        Ok((pos - last.len(), res))
     }
 
     fn update(&self, line: &mut rustyline::line_buffer::LineBuffer, start: usize, elected: &str) {
-        eprintln!("Updating line with {}", elected);
+        let quoted = shlex::quote(elected);
+        eprintln!("Updating line with {}", quoted);
         let end = line.pos();
-        line.replace(start..end, elected);
+        line.replace(start..end, quoted.as_ref());
     }
 }
 impl Helper for EditorHelper {}

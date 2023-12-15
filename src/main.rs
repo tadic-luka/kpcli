@@ -43,7 +43,7 @@ fn main() -> Result<(), DatabaseOpenError> {
     let mut executor = Executor::new(db);
 
     if let Some(cmd) = opts.command {
-        if let Err(err) = executor.execute(cmd) {
+        if let Err(err) = executor.execute(cmd, &mut EditorHelper::new()) {
             eprintln!("{}", err);
         };
         return Ok(());
@@ -52,8 +52,12 @@ fn main() -> Result<(), DatabaseOpenError> {
     println!("\nType 'help' for a description of available commands.");
     println!("Type 'help <command>' for details on individual commands.\n");
 
+    let mut editor_helper = EditorHelper::new();
+    if let Some(db) = executor.get_db() {
+        editor_helper.create_db_entries(db);
+    }
     let mut rl = Editor::new().unwrap();
-    rl.set_helper(Some(EditorHelper::new()));
+    rl.set_helper(Some(editor_helper));
     loop {
         let readline = if let Some(curr_group) = &executor.get_current_group_name() {
             rl.readline(&format!("{}>> ", curr_group))
@@ -70,7 +74,7 @@ fn main() -> Result<(), DatabaseOpenError> {
                     Ok(cmd) => cmd,
                 };
                 rl.add_history_entry(line.as_str());
-                if let Err(err) = executor.execute(command) {
+                if let Err(err) = executor.execute(command, rl.helper_mut().unwrap()) {
                     eprintln!("{}", err);
                 };
             }

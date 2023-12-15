@@ -74,3 +74,14 @@ impl Db {
         }
     }
 }
+
+pub fn get_all_prefixes_under_group(group: &Group) -> Vec<String> {
+    group
+        .children
+        .iter()
+        .filter_map(|node| match node {
+            Node::Group(g) => g.name.to_string().into(),
+            Node::Entry(e) => e.get_title().map(String::from),
+        })
+        .collect()
+}

@@ -12,6 +12,7 @@ use keepass::{
     db::{Entry, NodeRef, Value},
     Database,
 };
+pub use state::get_all_prefixes_under_group;
 use state::State;
 use totp_rs::TOTP;
 
@@ -33,7 +34,15 @@ impl Executor {
             .map(|db| db.get_current_group().name.as_ref())
     }
 
-    pub fn execute(&mut self, command: Command) -> Result<(), String> {
+    pub fn get_db(&self) -> Option<&Database> {
+        self.state.db.as_ref().map(|db| &db.db)
+    }
+
+    pub fn execute(
+        &mut self,
+        command: Command,
+        editor_helper: &mut EditorHelper,
+    ) -> Result<(), String> {
         match command {
             Command::ListDir { path } => {
                 let db = self
@@ -56,7 +65,10 @@ impl Executor {
                     .ok_or(format!("Database not opened"))?;
                 match db.change_current_group(&path) {
                     false => Err(format!("{} is not a group or doesn't exist!", path)),
-                    true => Ok(()),
+                    true => {
+                        editor_helper.set_dir_stack(db.dir_stack.clone());
+                        Ok(())
+                    }
                 }
             }
             Command::Show {
@@ -126,6 +138,7 @@ impl Executor {
                 let mut file = File::open(&path).map_err(|err| format!("{}", err))?;
                 let db = Database::open(&mut file, DatabaseKey::new().with_password(&password))
                     .map_err(|err| format!("{}", err))?;
+                editor_helper.create_db_entries(&db);
                 self.state = State::new(Some(db));
                 println!("{} successfully opened", path.display());
                 Ok(())
@@ -136,6 +149,7 @@ impl Executor {
                 }
                 println!("Closing database!");
                 self.state = State::new(None);
+                editor_helper.clear_db();
                 Ok(())
             }
         }

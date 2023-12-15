@@ -65,13 +65,13 @@ impl EditorHelper {
 
     pub fn create_db_entries(&mut self, db: &Database) {
         self.db_entries.clear();
-        self.db_root = db.root.uuid.clone();
+        self.db_root = db.root.uuid;
         for node in &db.root {
             if let NodeRef::Group(g) = node {
                 let mut all_entries = get_all_prefixes_under_group(g);
                 all_entries.sort();
                 let all_entries_trie = fst::Set::from_iter(&all_entries).unwrap();
-                self.db_entries.insert(g.uuid.clone(), all_entries_trie);
+                self.db_entries.insert(g.uuid, all_entries_trie);
             }
         }
     }
@@ -93,8 +93,8 @@ impl EditorHelper {
             .unwrap()
     }
 
-    fn find_non_positional_args<'a>(
-        &'a self,
+    fn find_non_positional_args(
+        &self,
         cmd: &str,
         prefix: &str,
         is_short: bool,
@@ -116,7 +116,7 @@ impl EditorHelper {
                     val.get_long().map(|val| format!("-{}", val)),
                 ]
                 .into_iter()
-                .filter_map(std::convert::identity)
+                .flatten()
             })
             .collect()
         } else if is_short {
@@ -144,7 +144,7 @@ impl EditorHelper {
                     let curr_dir = self.dir_stack.last().unwrap_or(&self.db_root);
                     let res = self
                         .db_entries
-                        .get(&curr_dir)
+                        .get(curr_dir)
                         .unwrap()
                         .search(Str::new(prefix).starts_with())
                         .into_stream()
@@ -155,7 +155,7 @@ impl EditorHelper {
                 _ => {}
             }
         }
-        return result;
+        result
     }
 }
 
@@ -190,7 +190,7 @@ impl Validator for EditorHelper {
     ) -> rustyline::Result<rustyline::validate::ValidationResult> {
         if let Err(err) = Command::try_parse(ctx.input()) {
             return Ok(rustyline::validate::ValidationResult::Invalid(Some(
-                format!("\n{}", err.to_string()),
+                format!("\n{}", err),
             )));
         }
         Ok(rustyline::validate::ValidationResult::Valid(None))
@@ -225,7 +225,7 @@ impl Completer for EditorHelper {
             // won't complete if not at last position in line
             return Ok((0, Vec::new()));
         }
-        let words = shlex::split(line).unwrap_or_else(Vec::new);
+        let words = shlex::split(line).unwrap_or_default();
         if words.is_empty() {
             return Ok((0, Vec::new()));
         }
@@ -244,20 +244,20 @@ impl Completer for EditorHelper {
         // autocomplete flag/option
         // if user input starts with "-"
         // and current input position is not whitespace
-        if last.starts_with("-")
+        if last.starts_with('-')
             && line
                 .chars()
                 .nth(pos - 1)
                 .is_some_and(|val| !val.is_whitespace())
         {
             let is_short = !last.starts_with("--");
-            let prefix = last.trim_start_matches("-");
+            let prefix = last.trim_start_matches('-');
             let cmd_flags_to_arg = self.cmd_flags_to_arg.get(cmd);
             let existing_flags: HashSet<&clap::Id> = if words.len() > 2 {
                 words[1..words.len() - 1]
-                    .into_iter()
+                    .iter()
                     .map(String::as_str)
-                    .map(|val| val.trim_start_matches("-"))
+                    .map(|val| val.trim_start_matches('-'))
                     .filter_map(|val| {
                         cmd_flags_to_arg.and_then(|flags_to_arg| flags_to_arg.get(val))
                     })

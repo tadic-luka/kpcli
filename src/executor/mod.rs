@@ -49,10 +49,11 @@ impl Executor {
                     .state
                     .db
                     .as_mut()
-                    .ok_or(format!("Database not opened"))?;
+                    .ok_or("Database not opened".to_string())?;
                 let group = db.get_current_group();
-                if let Some(node) = db.get_node(&group, &path) {
-                    Ok(list_node(node))
+                if let Some(node) = db.get_node(group, &path) {
+                    list_node(node);
+                    Ok(())
                 } else {
                     Err(format!("{} does not exist!", path))
                 }
@@ -62,7 +63,7 @@ impl Executor {
                     .state
                     .db
                     .as_mut()
-                    .ok_or(format!("Database not opened"))?;
+                    .ok_or("Database not opened".to_string())?;
                 match db.change_current_group(&path) {
                     false => Err(format!("{} is not a group or doesn't exist!", path)),
                     true => {
@@ -80,10 +81,11 @@ impl Executor {
                     .state
                     .db
                     .as_mut()
-                    .ok_or(format!("Database not opened"))?;
+                    .ok_or("Database not opened".to_string())?;
                 let group = db.get_current_group();
-                if let Some(node) = db.get_node(&group, &entry) {
-                    Ok(print_node(node, show_hidden, totp))
+                if let Some(node) = db.get_node(group, &entry) {
+                    print_node(node, show_hidden, totp);
+                    Ok(())
                 } else {
                     Err(format!("{} does not exist!", entry))
                 }
@@ -93,13 +95,16 @@ impl Executor {
                     .state
                     .db
                     .as_mut()
-                    .ok_or(format!("Database not opened"))?;
+                    .ok_or("Database not opened".to_string())?;
                 let group = db.get_current_group();
-                match db.get_node(&group, &entry) {
+                match db.get_node(group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
                         Err(format!("{} is not a group or doesn't exist!", entry))
                     }
-                    Some(NodeRef::Entry(e)) => Ok(copy_entry_field(e, "Password")),
+                    Some(NodeRef::Entry(e)) => {
+                        copy_entry_field(e, "Password");
+                        Ok(())
+                    }
                 }
             }
             Command::CopyUsername { entry } => {
@@ -107,13 +112,16 @@ impl Executor {
                     .state
                     .db
                     .as_mut()
-                    .ok_or(format!("Database not opened"))?;
+                    .ok_or("Database not opened".to_string())?;
                 let group = db.get_current_group();
-                match db.get_node(&group, &entry) {
+                match db.get_node(group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
                         Err(format!("{} is not a group or doesn't exist!", entry))
                     }
-                    Some(NodeRef::Entry(e)) => Ok(copy_entry_field(e, "UserName")),
+                    Some(NodeRef::Entry(e)) => {
+                        copy_entry_field(e, "UserName");
+                        Ok(())
+                    }
                 }
             }
             Command::CopyURL { entry } => {
@@ -121,19 +129,25 @@ impl Executor {
                     .state
                     .db
                     .as_mut()
-                    .ok_or(format!("Database not opened"))?;
+                    .ok_or("Database not opened".to_string())?;
                 let group = db.get_current_group();
-                match db.get_node(&group, &entry) {
+                match db.get_node(group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
                         Err(format!("{} is not a group or doesn't exist!", entry))
                     }
-                    Some(NodeRef::Entry(e)) => Ok(copy_entry_field(e, "URL")),
+                    Some(NodeRef::Entry(e)) => {
+                        copy_entry_field(e, "URL");
+                        Ok(())
+                    }
                 }
             }
-            Command::ClearClipboard => Ok(print_value_as_osc52(&[])),
+            Command::ClearClipboard => {
+                print_value_as_osc52(&[]);
+                Ok(())
+            }
             Command::OpenDB { path, password } => {
                 if self.state.db.is_some() {
-                    return Err(format!("Database already opened!"));
+                    return Err("Database already opened!".to_string());
                 }
                 let mut file = File::open(&path).map_err(|err| format!("{}", err))?;
                 let db = Database::open(&mut file, DatabaseKey::new().with_password(&password))
@@ -145,7 +159,7 @@ impl Executor {
             }
             Command::CloseDB => {
                 if self.state.db.is_none() {
-                    return Err(format!("No database opened!"));
+                    return Err("No database opened!".to_string());
                 }
                 println!("Closing database!");
                 self.state = State::new(None);
@@ -172,7 +186,7 @@ fn print_value_as_osc52(value: &[u8]) {
     println!("Done!");
 }
 
-fn copy_entry_field<'a>(entry: &'a Entry, field_name: &str) {
+fn copy_entry_field(entry: &Entry, field_name: &str) {
     match entry.fields.get(field_name) {
         Some(Value::Unprotected(value)) => {
             print_value_as_osc52(value.as_bytes());
@@ -181,7 +195,7 @@ fn copy_entry_field<'a>(entry: &'a Entry, field_name: &str) {
             print_value_as_osc52(value.unsecure());
         }
         Some(Value::Bytes(value)) => {
-            print_value_as_osc52(&value);
+            print_value_as_osc52(value);
         }
         None => {
             eprintln!("{} is not set!", field_name);
@@ -189,7 +203,7 @@ fn copy_entry_field<'a>(entry: &'a Entry, field_name: &str) {
     }
 }
 
-fn list_node<'a>(node: NodeRef<'a>) {
+fn list_node(node: NodeRef<'_>) {
     match node {
         NodeRef::Entry(e) => {
             let title = e.get_title().unwrap_or("(no title");
@@ -213,7 +227,7 @@ fn list_node<'a>(node: NodeRef<'a>) {
 
 fn get_totp(e: &Entry) -> Result<String, String> {
     e.get("otp")
-        .ok_or(format!("Entry does not have totp!"))
+        .ok_or("Entry does not have totp!".to_string())
         .and_then(|otp| {
             TOTP::from_url_unchecked(otp).map_err(|err| format!("Error generating totp: {}", err))
         })
@@ -230,13 +244,13 @@ fn print_totp(e: &Entry) {
     }
 }
 
-fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool, totp: bool) {
+fn print_node(node: NodeRef<'_>, show_hidden: bool, totp: bool) {
     const FIELD_NAME_WIDTH: usize = 15;
 
     fn get_value(val: &Value, show_hidden: bool) -> &str {
         match val {
             Value::Bytes(_) => "(bytes)",
-            Value::Unprotected(val) => &val,
+            Value::Unprotected(val) => val,
             Value::Protected(val) => {
                 if show_hidden {
                     let val = std::str::from_utf8(val.unsecure()).unwrap_or("");
@@ -294,7 +308,7 @@ fn print_node<'a>(node: NodeRef<'a>, show_hidden: bool, totp: bool) {
             if totp {
                 eprintln!("Can't show totp for group!");
             } else {
-                println!("");
+                println!();
             }
         }
     }

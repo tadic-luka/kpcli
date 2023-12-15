@@ -88,7 +88,7 @@ pub enum Command {
 
 impl Command {
     pub fn try_parse(input: &str) -> Result<Self, clap::Error> {
-        let words = shlex::split(input).unwrap_or_else(Vec::new);
+        let words = shlex::split(input).unwrap_or_default();
         Self::try_parse_from([String::new()].into_iter().chain(words))
     }
 }

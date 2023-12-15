@@ -46,14 +46,14 @@ impl Db {
 
     pub fn change_current_group(&mut self, path: &str) -> bool {
         let previous_stack = self.dir_stack.clone();
-        for path in path.split("/") {
+        for path in path.split('/') {
             if path == ".." {
                 self.dir_stack.pop();
                 continue;
             }
             match self.get_node(self.get_current_group(), path) {
                 Some(NodeRef::Group(g)) => {
-                    self.dir_stack.push(g.uuid.clone());
+                    self.dir_stack.push(g.uuid);
                 }
                 Some(NodeRef::Entry(_)) | None => {
                     self.dir_stack = previous_stack;
@@ -68,7 +68,7 @@ impl Db {
         match path {
             "" | "./" | "." => Some(NodeRef::Group(group)),
             _ => {
-                let full_path = path.split("/").collect::<Vec<_>>();
+                let full_path = path.split('/').collect::<Vec<_>>();
                 group.get(&full_path)
             }
         }

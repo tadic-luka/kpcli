@@ -68,8 +68,7 @@ impl EditorHelper {
         self.db_root = db.root.uuid;
         for node in &db.root {
             if let NodeRef::Group(g) = node {
-                let mut all_entries = get_all_prefixes_under_group(g);
-                all_entries.sort();
+                let all_entries = get_all_prefixes_under_group(g);
                 let all_entries_trie = fst::Set::from_iter(&all_entries).unwrap();
                 self.db_entries.insert(g.uuid, all_entries_trie);
             }
@@ -136,25 +135,40 @@ impl EditorHelper {
             return Vec::new();
         };
         let mut result = Vec::new();
-        for arg in cmd.get_arguments().filter(|arg| arg.is_positional()) {
-            match arg.get_value_hint() {
-                clap::ValueHint::Other => {
-                    // this is entry in keepass database
-                    // get database entries here
-                    let curr_dir = self.dir_stack.last().unwrap_or(&self.db_root);
-                    let res = self
-                        .db_entries
-                        .get(curr_dir)
-                        .unwrap()
-                        .search(Str::new(prefix).starts_with())
-                        .into_stream()
-                        .into_strs()
-                        .unwrap();
-                    result.extend(res);
+        if cmd
+            .get_arguments()
+            .any(|arg| arg.is_positional() && arg.get_value_hint() == clap::ValueHint::Other)
+        {
+            // this is entry in keepass database
+            // get database entries here
+            let curr_dir = self.dir_stack.last().unwrap_or(&self.db_root);
+            if let Some(trie) = self.db_entries.get(curr_dir) {
+                let matches: Vec<String> = trie
+                    .search(Str::new(prefix).starts_with())
+                    .into_stream()
+                    .into_strs()
+                    .unwrap_or_default();
+                for item in matches {
+                    let suffix = &item[prefix.len()..];
+                    if suffix.is_empty() {
+                        continue;
+                    }
+                    let next_component = match suffix.find('/') {
+                        Some(idx) => &item[..prefix.len() + idx + 1],
+                        None => item.as_str(),
+                    };
+
+                    // 'cd' strictly accepts groups (which end with '/')
+                    if cmd.get_name() == "cd" && !next_component.ends_with('/') {
+                        continue;
+                    }
+
+                    result.push(next_component.to_string());
                 }
-                _ => {}
             }
         }
+        result.sort();
+        result.dedup();
         result
     }
 }
@@ -284,3 +298,49 @@ impl Completer for EditorHelper {
     }
 }
 impl Helper for EditorHelper {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_positional_args_completion() {
+        let mut helper = EditorHelper::new();
+        let entries = vec![
+            "General/".to_string(),
+            "General/Finance/".to_string(),
+            "General/Finance/Bank Account".to_string(),
+            "General/Notes".to_string(),
+            "Personal Docs/".to_string(),
+            "Personal Docs/ID Card".to_string(),
+        ];
+        let trie = fst::Set::from_iter(&entries).unwrap();
+        let root_uuid = Uuid::new_v4();
+        helper.db_root = root_uuid;
+        helper.db_entries.insert(root_uuid, trie);
+
+        // cd at root: should only return groups, truncated to next component
+        let cd_root = helper.find_positional_args("cd", "");
+        assert_eq!(cd_root, vec!["General/", "Personal Docs/"]);
+
+        // show at root: returns both groups and top-level entries (all are in groups here)
+        let show_root = helper.find_positional_args("show", "");
+        assert_eq!(show_root, vec!["General/", "Personal Docs/"]);
+
+        // cd inside General/: only returns groups under General/
+        let cd_gen = helper.find_positional_args("cd", "General/");
+        assert_eq!(cd_gen, vec!["General/Finance/"]);
+
+        // show inside General/: returns sub-groups and entries
+        let show_gen = helper.find_positional_args("show", "General/");
+        assert_eq!(show_gen, vec!["General/Finance/", "General/Notes"]);
+
+        // show inside General/Finance/: completes nested entry
+        let show_fin = helper.find_positional_args("show", "General/Finance/");
+        assert_eq!(show_fin, vec!["General/Finance/Bank Account"]);
+
+        // show inside Personal Docs/: completes nested entry
+        let show_pers = helper.find_positional_args("show", "Personal Docs/");
+        assert_eq!(show_pers, vec!["Personal Docs/ID Card"]);
+    }
+}

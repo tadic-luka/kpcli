@@ -46,6 +46,11 @@ impl Db {
 
     pub fn change_current_group(&mut self, path: &str) -> bool {
         let previous_stack = self.dir_stack.clone();
+        // absolute path, or no path at all (plain `cd`):
+        // start from the root group (an empty stack)
+        if path.is_empty() || path.starts_with('/') {
+            self.dir_stack.clear();
+        }
         for component in path.split('/') {
             if component.is_empty() || component == "." {
                 continue;
@@ -68,6 +73,12 @@ impl Db {
     }
 
     pub fn get_node<'a>(&'a self, group: &'a Group, path: &str) -> Option<NodeRef<'a>> {
+        // absolute path: resolve from the root group instead of `group`
+        let group = if path.starts_with('/') {
+            &self.db.root
+        } else {
+            group
+        };
         let full_path: Vec<&str> = path
             .split('/')
             .filter(|s| !s.is_empty() && *s != ".")
@@ -193,6 +204,52 @@ mod tests {
                 None => panic!("indexed prefix {prefix:?} does not resolve"),
             }
         }
+    }
+
+    #[test]
+    fn test_absolute_paths_start_from_root() {
+        let mut general = Group::new("General");
+        general.children.push(Node::Group(Group::new("Finance")));
+        general.children.push(Node::Entry(titled_entry("Notes")));
+        let mut database = Database::new(Default::default());
+        database.root.children.push(Node::Group(general));
+        database.root.children.push(Node::Group(Group::new("Personal")));
+        let mut db = Db::new(database);
+
+        assert!(db.change_current_group("General/Finance"));
+        assert_eq!(db.dir_stack.len(), 2);
+
+        // absolute paths resolve from root, not from General/Finance
+        assert!(matches!(
+            db.get_node(db.get_current_group(), "/General/Notes"),
+            Some(NodeRef::Entry(_))
+        ));
+        assert!(matches!(
+            db.get_node(db.get_current_group(), "/"),
+            Some(NodeRef::Group(g)) if g.uuid == db.db.root.uuid
+        ));
+
+        assert!(db.change_current_group("/Personal"));
+        assert_eq!(db.get_current_group().name, "Personal");
+        assert_eq!(db.dir_stack.len(), 1);
+
+        // `cd /` goes back to root
+        assert!(db.change_current_group("/"));
+        assert!(db.dir_stack.is_empty());
+
+        // a failed absolute cd leaves the stack untouched
+        assert!(db.change_current_group("General"));
+        assert!(!db.change_current_group("/Missing"));
+        assert_eq!(db.get_current_group().name, "General");
+
+        // `cd .` stays put
+        assert!(db.change_current_group("."));
+        assert_eq!(db.get_current_group().name, "General");
+
+        // plain `cd` (empty path) goes back to root
+        assert!(db.change_current_group("/General/Finance"));
+        assert!(db.change_current_group(""));
+        assert!(db.dir_stack.is_empty());
     }
 
     #[test]

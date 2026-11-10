@@ -68,7 +68,7 @@ fn main() -> Result<(), DatabaseOpenError> {
             Ok(line) => {
                 let command = match Command::try_parse(&line) {
                     Err(err) => {
-                        err.print();
+                        let _ = err.print();
                         continue;
                     }
                     Ok(cmd) => cmd,

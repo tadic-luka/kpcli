@@ -7,7 +7,11 @@ use fst::{automaton::Str, Automaton, IntoStreamer};
 use keepass::db::NodeRef;
 use keepass::Database;
 use rustyline::{
-    completion::Completer, highlight::Highlighter, hint::Hinter, validate::Validator, Helper,
+    completion::{escape, extract_word, unescape, Completer, Quote},
+    highlight::Highlighter,
+    hint::Hinter,
+    validate::Validator,
+    Helper,
 };
 use uuid::Uuid;
 
@@ -163,7 +167,12 @@ impl EditorHelper {
                         continue;
                     }
 
-                    result.push(next_component.to_string());
+                    result.push(escape(
+                        next_component.to_string(),
+                        ESC_CHAR,
+                        ESCAPED_CHARS,
+                        Quote::None,
+                    ));
                 }
             }
         }
@@ -172,6 +181,17 @@ impl EditorHelper {
         result
     }
 }
+
+/// Escape character used in completions; `shlex::split` (used by
+/// `Command::try_parse`) treats `\x` as a literal `x` in an unquoted word.
+const ESC_CHAR: Option<char> = Some('\\');
+
+/// Characters separating arguments when locating the word under the cursor.
+const WORD_BREAKS: &[u8] = b" \t";
+
+/// Characters that `shlex::split` treats specially in an unquoted word.
+/// Each is backslash-escaped in completions so it parses back unchanged.
+const ESCAPED_CHARS: &[u8] = b" \t'\"\\#";
 
 impl Highlighter for PasswordInput {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
@@ -239,42 +259,37 @@ impl Completer for EditorHelper {
             // won't complete if not at last position in line
             return Ok((0, Vec::new()));
         }
-        let words = shlex::split(line).unwrap_or_default();
-        if words.is_empty() {
-            return Ok((0, Vec::new()));
+
+        let cmd = match line.split_whitespace().next() {
+            Some(c) => c,
+            None => return Ok((0, Vec::new())),
+        };
+
+        if pos <= cmd.len() {
+            return Ok((0, self.find_cmds_starting_with(cmd)));
         }
-        let cmd = &words[0];
-        if words.len() == 1 {
-            let word = &words[0];
-            if pos > word.len() {
-                // TODO: autocomplete positional argument only if needed
-                // don't autocomplete if user is moved from typing command
-                return Ok((pos, self.find_positional_args(cmd, "")));
-            }
-            return Ok((0, self.find_cmds_starting_with(word)));
-        }
-        let last = &words[words.len() - 1].trim();
+
+        let (arg_start, raw_arg) = extract_word(line, pos, ESC_CHAR, WORD_BREAKS);
 
         // autocomplete flag/option
         // if user input starts with "-"
         // and current input position is not whitespace
-        if last.starts_with('-')
+        if raw_arg.starts_with('-')
             && line
                 .chars()
                 .nth(pos - 1)
                 .is_some_and(|val| !val.is_whitespace())
         {
-            let is_short = !last.starts_with("--");
-            let prefix = last.trim_start_matches('-');
+            let is_short = !raw_arg.starts_with("--");
+            let prefix = raw_arg.trim_start_matches('-');
             let cmd_flags_to_arg = self.cmd_flags_to_arg.get(cmd);
-            let existing_flags: HashSet<&clap::Id> = if words.len() > 2 {
-                words[1..words.len() - 1]
+            let existing_flags: HashSet<&clap::Id> = if let Some(flags_to_arg) = cmd_flags_to_arg {
+                shlex::split(&line[..arg_start])
+                    .unwrap_or_default()
                     .iter()
                     .map(String::as_str)
                     .map(|val| val.trim_start_matches('-'))
-                    .filter_map(|val| {
-                        cmd_flags_to_arg.and_then(|flags_to_arg| flags_to_arg.get(val))
-                    })
+                    .filter_map(|val| flags_to_arg.get(val))
                     .map(|arg| arg.get_id())
                     .collect()
             } else {
@@ -285,16 +300,16 @@ impl Completer for EditorHelper {
                 self.find_non_positional_args(cmd, prefix, is_short, existing_flags),
             ));
         }
+
         // positional arg
-        let res = self.find_positional_args(cmd, last);
-        Ok((pos - last.len(), res))
+        let unescaped_prefix = unescape(raw_arg, ESC_CHAR);
+        let res = self.find_positional_args(cmd, &unescaped_prefix);
+        Ok((arg_start, res))
     }
 
     fn update(&self, line: &mut rustyline::line_buffer::LineBuffer, start: usize, elected: &str) {
-        let quoted = shlex::quote(elected);
-        eprintln!("Updating line with {}", quoted);
         let end = line.pos();
-        line.replace(start..end, quoted.as_ref());
+        line.replace(start..end, elected);
     }
 }
 impl Helper for EditorHelper {}
@@ -302,6 +317,24 @@ impl Helper for EditorHelper {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn esc(s: &str) -> String {
+        escape(s.to_string(), ESC_CHAR, ESCAPED_CHARS, Quote::None)
+    }
+
+    fn arg_start(line: &str) -> usize {
+        extract_word(line, line.len(), ESC_CHAR, WORD_BREAKS).0
+    }
+
+    #[test]
+    fn test_arg_start() {
+        assert_eq!(arg_start("cd "), 3);
+        assert_eq!(arg_start("cd General"), 3);
+        assert_eq!(arg_start("cd General\\ Info"), 3);
+        assert_eq!(arg_start("cd General\\ Info/Sub"), 3);
+        assert_eq!(arg_start("show -s Entry"), 8);
+        assert_eq!(arg_start("show\tEntry"), 5);
+    }
 
     #[test]
     fn test_find_positional_args_completion() {
@@ -319,13 +352,13 @@ mod tests {
         helper.db_root = root_uuid;
         helper.db_entries.insert(root_uuid, trie);
 
-        // cd at root: should only return groups, truncated to next component
+        // cd at root: should only return groups, truncated to next component, spaces escaped
         let cd_root = helper.find_positional_args("cd", "");
-        assert_eq!(cd_root, vec!["General/", "Personal Docs/"]);
+        assert_eq!(cd_root, vec!["General/", "Personal\\ Docs/"]);
 
         // show at root: returns both groups and top-level entries (all are in groups here)
         let show_root = helper.find_positional_args("show", "");
-        assert_eq!(show_root, vec!["General/", "Personal Docs/"]);
+        assert_eq!(show_root, vec!["General/", "Personal\\ Docs/"]);
 
         // cd inside General/: only returns groups under General/
         let cd_gen = helper.find_positional_args("cd", "General/");
@@ -335,12 +368,64 @@ mod tests {
         let show_gen = helper.find_positional_args("show", "General/");
         assert_eq!(show_gen, vec!["General/Finance/", "General/Notes"]);
 
-        // show inside General/Finance/: completes nested entry
+        // show inside General/Finance/: completes nested entry with space escaped
         let show_fin = helper.find_positional_args("show", "General/Finance/");
-        assert_eq!(show_fin, vec!["General/Finance/Bank Account"]);
+        assert_eq!(show_fin, vec!["General/Finance/Bank\\ Account"]);
 
-        // show inside Personal Docs/: completes nested entry
+        // show inside Personal Docs/: completes nested entry with spaces escaped
         let show_pers = helper.find_positional_args("show", "Personal Docs/");
-        assert_eq!(show_pers, vec!["Personal Docs/ID Card"]);
+        assert_eq!(show_pers, vec!["Personal\\ Docs/ID\\ Card"]);
+    }
+
+    #[test]
+    fn test_escape_round_trips_through_command_parsing() {
+        let names = [
+            "plain",
+            "with space",
+            "Bob's Bank",
+            "say \"hi\"",
+            "back\\slash",
+            "#hashtag",
+            "mid#hash",
+            "tab\there",
+            " padded ",
+            "trailing\\",
+        ];
+        for name in names {
+            let escaped = esc(name);
+            assert_eq!(unescape(&escaped, ESC_CHAR), name, "unescape({escaped:?})");
+            let words = shlex::split(&format!("show {escaped}"));
+            assert_eq!(
+                words,
+                Some(vec!["show".to_string(), name.to_string()]),
+                "shlex::split of {escaped:?}"
+            );
+            // escaped spaces/tabs must not split the argument for completion
+            let line = format!("show {escaped}");
+            assert_eq!(arg_start(&line), 5, "{line:?}");
+        }
+        assert_eq!(unescape("Personal\\", ESC_CHAR), "Personal");
+    }
+
+    #[test]
+    fn test_complete_special_chars() {
+        let mut helper = EditorHelper::new();
+        let entries = vec![
+            "Bob's \"Bank\"/".to_string(),
+            "Bob's \"Bank\"/#1 acct".to_string(),
+        ];
+        let trie = fst::Set::from_iter(&entries).unwrap();
+        let root_uuid = Uuid::new_v4();
+        helper.db_root = root_uuid;
+        helper.db_entries.insert(root_uuid, trie);
+
+        let typed = r#"Bob\'s\ \"Bank\"/"#;
+        let res = helper.find_positional_args("show", &unescape(typed, ESC_CHAR));
+        assert_eq!(res, vec![r#"Bob\'s\ \"Bank\"/\#1\ acct"#]);
+        let cmd = Command::try_parse(&format!("show {}", res[0])).unwrap();
+        match cmd {
+            Command::Show { entry, .. } => assert_eq!(entry, "Bob's \"Bank\"/#1 acct"),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

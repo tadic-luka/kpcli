@@ -186,7 +186,7 @@ impl EditorHelper {
     fn complete_at(&self, line: &str, pos: usize) -> (usize, Vec<String>) {
         if pos == 0 {
             // completing all cmds
-            return (0, self.cmds.keys().map(String::from).collect());
+            return (0, self.find_cmds_starting_with(""));
         } else if pos != line.len() {
             // won't complete if not at last position in line
             return (0, Vec::new());
@@ -454,13 +454,16 @@ mod tests {
     #[test]
     fn test_complete_all_commands_on_empty_line() {
         let helper = EditorHelper::new();
-        let (start, mut cmds) = helper.complete_at("", 0);
-        assert_eq!(start, 0);
-        // order comes from a HashMap today, so sort before comparing
-        cmds.sort();
+        // sorted, not in HashMap order
         assert_eq!(
-            cmds,
-            vec!["cd", "close", "cp", "cu", "cw", "cx", "ls", "open", "show"]
+            helper.complete_at("", 0),
+            (
+                0,
+                vec!["cd", "close", "cp", "cu", "cw", "cx", "ls", "open", "show"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect()
+            )
         );
     }
 
@@ -587,16 +590,6 @@ mod tests {
         // no index for the current group: no completions, no panic
         helper.set_dir_stack(vec![Uuid::new_v4()]);
         assert_eq!(complete_end(&helper, "show "), (5, Vec::new()));
-    }
-
-    #[test]
-    #[ignore = "known bug: completing an empty line returns commands in HashMap order"]
-    fn test_complete_empty_line_is_sorted() {
-        let helper = EditorHelper::new();
-        let (_, cmds) = helper.complete_at("", 0);
-        let mut sorted = cmds.clone();
-        sorted.sort();
-        assert_eq!(cmds, sorted);
     }
 
     #[test]

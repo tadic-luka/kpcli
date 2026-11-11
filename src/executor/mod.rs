@@ -3,14 +3,15 @@ mod editor_helper;
 mod state;
 
 use std::fs::File;
+use std::path::Path;
 
 pub use command::Command;
 pub use editor_helper::EditorHelper;
 pub use editor_helper::PasswordInput;
-use keepass::DatabaseKey;
 use keepass::{
     db::{Entry, NodeRef, Value},
-    Database,
+    error::DatabaseOpenError,
+    Database, DatabaseKey,
 };
 pub use state::get_all_prefixes_under_group;
 use state::{Db, State};
@@ -106,9 +107,7 @@ impl Executor {
                 if self.state.db.is_some() {
                     return Err("Database already opened!".to_string());
                 }
-                let mut file = File::open(&path).map_err(|err| format!("{}", err))?;
-                let db = Database::open(&mut file, DatabaseKey::new().with_password(&password))
-                    .map_err(|err| format!("{}", err))?;
+                let db = open_db(&path, &password).map_err(|err| err.to_string())?;
                 editor_helper.create_db_entries(&db);
                 self.state = State::new(Some(db));
                 println!("{} successfully opened", path.display());
@@ -125,6 +124,12 @@ impl Executor {
             }
         }
     }
+}
+
+/// Open the KeePass database at `path` with `password`.
+pub fn open_db(path: &Path, password: &str) -> Result<Database, DatabaseOpenError> {
+    let mut file = File::open(path)?;
+    Database::open(&mut file, DatabaseKey::new().with_password(password))
 }
 
 /// This uses OSC52 terminal escape command

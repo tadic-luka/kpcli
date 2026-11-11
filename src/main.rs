@@ -2,50 +2,51 @@ mod executor;
 mod opt;
 
 use clap::Parser;
-use executor::{Command, EditorHelper, Executor, PasswordInput};
-use keepass::DatabaseKey;
-use keepass::{error::DatabaseOpenError, Database};
+use executor::{open_db, Command, EditorHelper, Executor, PasswordInput};
+use keepass::error::DatabaseOpenError;
 use opt::Opts;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
-use std::fs::File;
-use std::path::PathBuf;
 
-fn open_db(file: &PathBuf, password: &str) -> Result<Database, DatabaseOpenError> {
-    let mut file = File::open(file)?;
-    Database::open(&mut file, DatabaseKey::new().with_password(password))
+/// Prompt for the database password without echoing it.
+/// Prints the error and returns `None` if the line can't be read.
+fn read_password() -> Option<String> {
+    let mut rl = Editor::new().unwrap();
+    rl.set_helper(Some(PasswordInput));
+    match rl.readline("Enter password: ") {
+        Ok(line) => Some(line),
+        Err(err) => {
+            eprintln!("Error reading line: {}", err);
+            None
+        }
+    }
+}
+
+/// Run one command, printing its error if it fails.
+fn run_command(executor: &mut Executor, command: Command, editor_helper: &mut EditorHelper) {
+    if let Err(err) = executor.execute(command, editor_helper) {
+        eprintln!("{}", err);
+    }
 }
 
 fn main() -> Result<(), DatabaseOpenError> {
     let opts = Opts::parse();
 
     // Open KeePass database if file was given in cmdline
-    let db: Option<Database> = if let Some(ref file) = opts.db_file {
-        let password = match opts.password {
-            Some(password) => password,
-            None => {
-                let mut rl = Editor::new().unwrap();
-                rl.set_helper(Some(PasswordInput));
-                match rl.readline("Enter password: ") {
-                    Ok(line) => line,
-                    Err(err) => {
-                        eprintln!("Error reading line: {}", err);
-                        return Ok(());
-                    }
-                }
-            }
-        };
-        Some(open_db(file, &password)?)
-    } else {
-        None
+    let db = match &opts.db_file {
+        Some(file) => {
+            let Some(password) = opts.password.or_else(read_password) else {
+                return Ok(());
+            };
+            Some(open_db(file, &password)?)
+        }
+        None => None,
     };
 
     let mut executor = Executor::new(db);
 
     if let Some(cmd) = opts.command {
-        if let Err(err) = executor.execute(cmd, &mut EditorHelper::new()) {
-            eprintln!("{}", err);
-        };
+        run_command(&mut executor, cmd, &mut EditorHelper::new());
         return Ok(());
     }
 
@@ -59,12 +60,11 @@ fn main() -> Result<(), DatabaseOpenError> {
     let mut rl = Editor::new().unwrap();
     rl.set_helper(Some(editor_helper));
     loop {
-        let readline = if let Some(curr_group) = &executor.get_current_group_name() {
-            rl.readline(&format!("{}>> ", curr_group))
-        } else {
-            rl.readline(">> ")
+        let prompt = match executor.get_current_group_name() {
+            Some(group) => format!("{}>> ", group),
+            None => ">> ".to_string(),
         };
-        match readline {
+        match rl.readline(&prompt) {
             Ok(line) => {
                 let command = match Command::try_parse(&line) {
                     Err(err) => {
@@ -74,9 +74,7 @@ fn main() -> Result<(), DatabaseOpenError> {
                     Ok(cmd) => cmd,
                 };
                 rl.add_history_entry(line.as_str());
-                if let Err(err) = executor.execute(command, rl.helper_mut().unwrap()) {
-                    eprintln!("{}", err);
-                };
+                run_command(&mut executor, command, rl.helper_mut().unwrap());
             }
             Err(ReadlineError::Interrupted) => {
                 println!("CTRL-C");

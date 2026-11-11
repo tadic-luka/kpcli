@@ -99,7 +99,7 @@ impl Executor {
                 let group = db.get_current_group();
                 match db.get_node(group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
-                        Err(format!("{} is not a group or doesn't exist!", entry))
+                        Err(format!("{} is not an entry or doesn't exist!", entry))
                     }
                     Some(NodeRef::Entry(e)) => {
                         copy_entry_field(e, "Password");
@@ -116,7 +116,7 @@ impl Executor {
                 let group = db.get_current_group();
                 match db.get_node(group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
-                        Err(format!("{} is not a group or doesn't exist!", entry))
+                        Err(format!("{} is not an entry or doesn't exist!", entry))
                     }
                     Some(NodeRef::Entry(e)) => {
                         copy_entry_field(e, "UserName");
@@ -133,7 +133,7 @@ impl Executor {
                 let group = db.get_current_group();
                 match db.get_node(group, &entry) {
                     Some(NodeRef::Group(_)) | None => {
-                        Err(format!("{} is not a group or doesn't exist!", entry))
+                        Err(format!("{} is not an entry or doesn't exist!", entry))
                     }
                     Some(NodeRef::Entry(e)) => {
                         copy_entry_field(e, "URL");
@@ -419,10 +419,15 @@ mod tests {
             assert_eq!(run(&mut executor, &format!("{cmd} General/Notes")), Ok(()));
             // an unset field prints an error but still succeeds
             assert_eq!(run(&mut executor, &format!("{cmd} General/Bare")), Ok(()));
-            // groups and missing paths are errors (exact text is a known bug,
-            // it says "is not a group" for an entry target)
-            assert!(run(&mut executor, &format!("{cmd} General")).is_err());
-            assert!(run(&mut executor, &format!("{cmd} General/Missing")).is_err());
+            // groups and missing paths are errors
+            assert_eq!(
+                run(&mut executor, &format!("{cmd} General")),
+                Err("General is not an entry or doesn't exist!".to_string())
+            );
+            assert_eq!(
+                run(&mut executor, &format!("{cmd} General/Missing")),
+                Err("General/Missing is not an entry or doesn't exist!".to_string())
+            );
         }
     }
 

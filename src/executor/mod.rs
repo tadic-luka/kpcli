@@ -50,8 +50,7 @@ impl Executor {
                     .db
                     .as_mut()
                     .ok_or("Database not opened".to_string())?;
-                let group = db.get_current_group();
-                if let Some(node) = db.get_node(group, &path) {
+                if let Some(node) = db.get_node(&path) {
                     list_node(node);
                     Ok(())
                 } else {
@@ -82,8 +81,7 @@ impl Executor {
                     .db
                     .as_mut()
                     .ok_or("Database not opened".to_string())?;
-                let group = db.get_current_group();
-                if let Some(node) = db.get_node(group, &entry) {
+                if let Some(node) = db.get_node(&entry) {
                     print_node(node, show_hidden, totp);
                     Ok(())
                 } else {
@@ -96,8 +94,7 @@ impl Executor {
                     .db
                     .as_mut()
                     .ok_or("Database not opened".to_string())?;
-                let group = db.get_current_group();
-                match db.get_node(group, &entry) {
+                match db.get_node(&entry) {
                     Some(NodeRef::Group(_)) | None => {
                         Err(format!("{} is not an entry or doesn't exist!", entry))
                     }
@@ -113,8 +110,7 @@ impl Executor {
                     .db
                     .as_mut()
                     .ok_or("Database not opened".to_string())?;
-                let group = db.get_current_group();
-                match db.get_node(group, &entry) {
+                match db.get_node(&entry) {
                     Some(NodeRef::Group(_)) | None => {
                         Err(format!("{} is not an entry or doesn't exist!", entry))
                     }
@@ -130,8 +126,7 @@ impl Executor {
                     .db
                     .as_mut()
                     .ok_or("Database not opened".to_string())?;
-                let group = db.get_current_group();
-                match db.get_node(group, &entry) {
+                match db.get_node(&entry) {
                     Some(NodeRef::Group(_)) | None => {
                         Err(format!("{} is not an entry or doesn't exist!", entry))
                     }
@@ -449,6 +444,11 @@ mod tests {
         assert_eq!(executor.get_current_group_name(), Some("General"));
 
         assert_eq!(run(&mut executor, "cd Finance"), Ok(()));
+        assert_eq!(dir_depth(&executor), 2);
+        // `..` works in ls/show/cp paths too, without changing the group
+        for line in ["ls ..", "ls ../..", "show ../Notes", "cp ../Notes"] {
+            assert_eq!(run(&mut executor, line), Ok(()), "{line}");
+        }
         assert_eq!(dir_depth(&executor), 2);
         assert_eq!(run(&mut executor, "cd .."), Ok(()));
         assert_eq!(dir_depth(&executor), 1);

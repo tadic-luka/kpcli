@@ -1,5 +1,5 @@
 use keepass::{
-    db::{Group, Node, NodeRef},
+    db::{Entry, Group, Node, NodeRef},
     Database,
 };
 use uuid::Uuid;
@@ -45,49 +45,76 @@ impl Db {
     }
 
     pub fn change_current_group(&mut self, path: &str) -> bool {
-        let previous_stack = self.dir_stack.clone();
-        // absolute path, or no path at all (plain `cd`):
-        // start from the root group (an empty stack)
-        if path.is_empty() || path.starts_with('/') {
+        // no path at all (plain `cd`): back to the root group
+        if path.is_empty() {
             self.dir_stack.clear();
+            return true;
         }
-        for component in path.split('/') {
-            if component.is_empty() || component == "." {
-                continue;
+        match self.walk(path) {
+            Some((groups, None)) => {
+                // groups[0] is the root, which is not on the stack
+                self.dir_stack = groups[1..].iter().map(|g| g.uuid).collect();
+                true
             }
-            if component == ".." {
-                self.dir_stack.pop();
-                continue;
-            }
-            match self.get_node(self.get_current_group(), component) {
-                Some(NodeRef::Group(g)) => {
-                    self.dir_stack.push(g.uuid);
-                }
-                Some(NodeRef::Entry(_)) | None => {
-                    self.dir_stack = previous_stack;
-                    return false;
-                }
-            }
+            // the path ends on an entry, or doesn't exist
+            Some((_, Some(_))) | None => false,
         }
-        true
     }
 
-    pub fn get_node<'a>(&'a self, group: &'a Group, path: &str) -> Option<NodeRef<'a>> {
-        // absolute path: resolve from the root group instead of `group`
-        let group = if path.starts_with('/') {
-            &self.db.root
-        } else {
-            group
-        };
-        let full_path: Vec<&str> = path
-            .split('/')
-            .filter(|s| !s.is_empty() && *s != ".")
-            .collect();
-        if full_path.is_empty() {
-            Some(NodeRef::Group(group))
-        } else {
-            group.get(&full_path)
+    /// Resolve `path` relative to the current group, or to the root group if
+    /// it starts with `/`. An empty path is the current group itself.
+    pub fn get_node(&self, path: &str) -> Option<NodeRef<'_>> {
+        match self.walk(path)? {
+            (_, Some(entry)) => Some(NodeRef::Entry(entry)),
+            (groups, None) => groups.last().map(|g| NodeRef::Group(g)),
         }
+    }
+
+    /// Walk `path` and return the chain of groups from the root to the last
+    /// group reached, plus the entry the path ends on, if it ends on one.
+    ///
+    /// Empty and `.` components are skipped and `..` goes to the parent group
+    /// (staying at the root). The last component matches the first child with
+    /// that group name or entry title; earlier components must name a group.
+    fn walk(&self, path: &str) -> Option<(Vec<&Group>, Option<&Entry>)> {
+        let mut groups = vec![&self.db.root];
+        if !path.starts_with('/') {
+            for uuid in &self.dir_stack {
+                let child = groups.last()?.children.iter().find_map(|n| match n {
+                    Node::Group(g) if g.uuid == *uuid => Some(g),
+                    _ => None,
+                })?;
+                groups.push(child);
+            }
+        }
+
+        let components: Vec<&str> = path
+            .split('/')
+            .filter(|c| !c.is_empty() && *c != ".")
+            .collect();
+        for (i, component) in components.iter().enumerate() {
+            if *component == ".." {
+                if groups.len() > 1 {
+                    groups.pop();
+                }
+                continue;
+            }
+            let is_last = i + 1 == components.len();
+            let current = *groups.last()?;
+            if is_last {
+                match current.get(&[component])? {
+                    NodeRef::Group(g) => groups.push(g),
+                    NodeRef::Entry(e) => return Some((groups, Some(e))),
+                }
+            } else {
+                let child = current.children.iter().find_map(|n| match n {
+                    Node::Group(g) if g.name == *component => Some(g),
+                    _ => None,
+                })?;
+                groups.push(child);
+            }
+        }
+        Some((groups, None))
     }
 }
 
@@ -187,17 +214,17 @@ mod tests {
 
     #[test]
     fn test_every_indexed_prefix_resolves() {
-        let mut root = Group::new("Root");
         let mut general = Group::new(" General ");
         let mut finance = Group::new("Bob's \"Bank\"");
         finance.children.push(Node::Entry(titled_entry("#1 \\ acct")));
         general.children.push(Node::Group(finance));
         general.children.push(Node::Entry(titled_entry("x/y")));
-        root.children.push(Node::Group(general));
-        let db = Db::new(Database::new(Default::default()));
+        let mut database = Database::new(Default::default());
+        database.root.children.push(Node::Group(general));
+        let db = Db::new(database);
 
-        for prefix in get_all_prefixes_under_group(&root) {
-            let node = db.get_node(&root, &prefix);
+        for prefix in get_all_prefixes_under_group(&db.db.root) {
+            let node = db.get_node(&prefix);
             match node {
                 Some(NodeRef::Group(_)) => assert!(prefix.ends_with('/'), "{prefix}"),
                 Some(NodeRef::Entry(_)) => assert!(!prefix.ends_with('/'), "{prefix}"),
@@ -221,11 +248,11 @@ mod tests {
 
         // absolute paths resolve from root, not from General/Finance
         assert!(matches!(
-            db.get_node(db.get_current_group(), "/General/Notes"),
+            db.get_node("/General/Notes"),
             Some(NodeRef::Entry(_))
         ));
         assert!(matches!(
-            db.get_node(db.get_current_group(), "/"),
+            db.get_node("/"),
             Some(NodeRef::Group(g)) if g.uuid == db.db.root.uuid
         ));
 
@@ -311,42 +338,33 @@ mod tests {
     fn test_get_node_relative_paths() {
         let mut db = sample_db();
         assert!(db.change_current_group("General"));
-        let current = db.get_current_group();
 
+        assert!(matches!(db.get_node("Notes"), Some(NodeRef::Entry(_))));
         assert!(matches!(
-            db.get_node(current, "Notes"),
-            Some(NodeRef::Entry(_))
-        ));
-        assert!(matches!(
-            db.get_node(current, "./Finance/"),
+            db.get_node("./Finance/"),
             Some(NodeRef::Group(g)) if g.name == "Finance"
         ));
         // empty path is the group itself
         assert!(matches!(
-            db.get_node(current, ""),
+            db.get_node(""),
             Some(NodeRef::Group(g)) if g.name == "General"
         ));
-        assert!(db.get_node(current, "Missing").is_none());
-        assert!(db.get_node(current, "Notes/Deeper").is_none());
+        assert!(db.get_node("Missing").is_none());
+        assert!(db.get_node("Notes/Deeper").is_none());
     }
 
     #[test]
-    #[ignore = "known bug: get_node treats `..` as a literal name, so `ls ..` and `show ../X` fail"]
     fn test_get_node_parent_paths() {
         let mut db = sample_db();
         assert!(db.change_current_group("General/Finance"));
-        let current = db.get_current_group();
 
+        assert!(matches!(db.get_node("../Notes"), Some(NodeRef::Entry(_))));
         assert!(matches!(
-            db.get_node(current, "../Notes"),
-            Some(NodeRef::Entry(_))
-        ));
-        assert!(matches!(
-            db.get_node(current, "../../Personal"),
+            db.get_node("../../Personal"),
             Some(NodeRef::Group(g)) if g.name == "Personal"
         ));
         assert!(matches!(
-            db.get_node(current, ".."),
+            db.get_node(".."),
             Some(NodeRef::Group(g)) if g.name == "General"
         ));
     }

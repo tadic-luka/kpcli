@@ -192,9 +192,8 @@ impl EditorHelper {
             return (0, Vec::new());
         }
 
-        let cmd = match line.split_whitespace().next() {
-            Some(c) => c,
-            None => return (0, Vec::new()),
+        let Some(cmd) = line.split_whitespace().next() else {
+            return (0, Vec::new());
         };
 
         // the command may be preceded by whitespace
@@ -211,22 +210,10 @@ impl EditorHelper {
         if raw_arg.starts_with('-') && !line[..pos].ends_with(char::is_whitespace) {
             let is_short = !raw_arg.starts_with("--");
             let prefix = raw_arg.trim_start_matches('-');
-            let cmd_flags_to_arg = self.cmd_flags_to_arg.get(cmd);
-            let existing_flags: HashSet<&clap::Id> = if let Some(flags_to_arg) = cmd_flags_to_arg {
-                shlex::split(&line[..arg_start])
-                    .unwrap_or_default()
-                    .iter()
-                    .map(String::as_str)
-                    .map(|val| val.trim_start_matches('-'))
-                    .filter_map(|val| flags_to_arg.get(val))
-                    .map(|arg| arg.get_id())
-                    .collect()
-            } else {
-                HashSet::new()
-            };
+            let used = self.used_flag_ids(cmd, &line[..arg_start]);
             return (
                 pos,
-                self.find_non_positional_args(cmd, prefix, is_short, existing_flags),
+                self.find_non_positional_args(cmd, prefix, is_short, used),
             );
         }
 
@@ -234,6 +221,21 @@ impl EditorHelper {
         let unescaped_prefix = unescape(raw_arg, ESC_CHAR);
         let res = self.find_positional_args(cmd, &unescaped_prefix);
         (arg_start, res)
+    }
+
+    /// Ids of the flags of `cmd` already typed in `before`, the part of the
+    /// line in front of the word being completed. Each is matched by its
+    /// long or short name, so `--totp` and `-t` count as the same flag.
+    fn used_flag_ids(&self, cmd: &str, before: &str) -> HashSet<&clap::Id> {
+        let Some(flags_to_arg) = self.cmd_flags_to_arg.get(cmd) else {
+            return HashSet::new();
+        };
+        shlex::split(before)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|word| flags_to_arg.get(word.trim_start_matches('-')))
+            .map(clap::Arg::get_id)
+            .collect()
     }
 }
 
@@ -637,6 +639,29 @@ mod tests {
         // `-\ ` is a path starting with "- ", not a flag
         let helper = EditorHelper::new();
         assert_eq!(complete_end(&helper, "show -\\ "), (5, Vec::new()));
+    }
+
+    #[test]
+    fn test_used_flag_ids() {
+        let helper = EditorHelper::new();
+        let ids = |cmd: &str, before: &str| -> Vec<String> {
+            let mut ids: Vec<String> = helper
+                .used_flag_ids(cmd, before)
+                .into_iter()
+                .map(|id| id.to_string())
+                .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids("show", "show "), Vec::<String>::new());
+        assert_eq!(ids("show", "show -t "), vec!["totp"]);
+        // long and short spellings are the same flag
+        assert_eq!(ids("show", "show --totp -t "), vec!["totp"]);
+        assert_eq!(ids("show", "show -s --totp "), vec!["show_hidden", "totp"]);
+        // only flags of this command count, not other words
+        assert_eq!(ids("show", "show General/Notes "), Vec::<String>::new());
+        assert_eq!(ids("cd", "cd -t "), Vec::<String>::new());
+        assert_eq!(ids("nope", "nope -t "), Vec::<String>::new());
     }
 
     fn find_flags(helper: &EditorHelper, cmd: &str, prefix: &str, is_short: bool) -> Vec<String> {

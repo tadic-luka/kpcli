@@ -186,10 +186,14 @@ mod tests {
         let mut general = Group::new("General");
         // unaddressable group: it and everything under it is skipped
         let mut slashed = Group::new("Finance / Banking");
-        slashed.children.push(Node::Entry(titled_entry("Bank Account")));
+        slashed
+            .children
+            .push(Node::Entry(titled_entry("Bank Account")));
         general.children.push(Node::Group(slashed));
         let mut finance = Group::new("Finance");
-        finance.children.push(Node::Entry(titled_entry("Bank Account")));
+        finance
+            .children
+            .push(Node::Entry(titled_entry("Bank Account")));
         general.children.push(Node::Group(finance));
         general.children.push(Node::Entry(titled_entry("Notes")));
         general.children.push(Node::Entry(titled_entry("a/b")));
@@ -215,7 +219,9 @@ mod tests {
     fn test_every_indexed_prefix_resolves() {
         let mut general = Group::new(" General ");
         let mut finance = Group::new("Bob's \"Bank\"");
-        finance.children.push(Node::Entry(titled_entry("#1 \\ acct")));
+        finance
+            .children
+            .push(Node::Entry(titled_entry("#1 \\ acct")));
         general.children.push(Node::Group(finance));
         general.children.push(Node::Entry(titled_entry("x/y")));
         let mut database = Database::new(Default::default());
@@ -239,7 +245,10 @@ mod tests {
         general.children.push(Node::Entry(titled_entry("Notes")));
         let mut database = Database::new(Default::default());
         database.root.children.push(Node::Group(general));
-        database.root.children.push(Node::Group(Group::new("Personal")));
+        database
+            .root
+            .children
+            .push(Node::Group(Group::new("Personal")));
         let mut db = Db::new(database);
 
         assert!(db.change_current_group("General/Finance"));

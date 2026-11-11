@@ -206,12 +206,7 @@ impl EditorHelper {
         // autocomplete flag/option
         // if user input starts with "-"
         // and current input position is not whitespace
-        if raw_arg.starts_with('-')
-            && line
-                .chars()
-                .nth(pos - 1)
-                .is_some_and(|val| !val.is_whitespace())
-        {
+        if raw_arg.starts_with('-') && !line[..pos].ends_with(char::is_whitespace) {
             let is_short = !raw_arg.starts_with("--");
             let prefix = raw_arg.trim_start_matches('-');
             let cmd_flags_to_arg = self.cmd_flags_to_arg.get(cmd);
@@ -605,7 +600,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known bug: `chars().nth(pos - 1)` treats a byte position as a char index"]
     fn test_complete_flags_after_non_ascii() {
         let helper = EditorHelper::new();
         let line = "show é -";
@@ -626,6 +620,13 @@ mod tests {
     fn test_complete_command_name_after_leading_whitespace() {
         let helper = EditorHelper::new();
         assert_eq!(complete_end(&helper, "  sh"), (2, vec!["show".to_string()]));
+    }
+
+    #[test]
+    fn test_complete_escaped_space_after_dash_is_not_a_flag() {
+        // `-\ ` is a path starting with "- ", not a flag
+        let helper = EditorHelper::new();
+        assert_eq!(complete_end(&helper, "show -\\ "), (5, Vec::new()));
     }
 
     fn find_flags(helper: &EditorHelper, cmd: &str, prefix: &str, is_short: bool) -> Vec<String> {

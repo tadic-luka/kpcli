@@ -1,6 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use clap::CommandFactory;
 use fst::{automaton::Str, Automaton, IntoStreamer};
@@ -103,9 +102,7 @@ impl EditorHelper {
         is_short: bool,
         ignore_flags: HashSet<&clap::Id>,
     ) -> Vec<String> {
-        let cmd = if let Some(cmd) = self.cmds.get(cmd) {
-            cmd
-        } else {
+        let Some(cmd) = self.cmds.get(cmd) else {
             return Vec::new();
         };
 
@@ -132,53 +129,37 @@ impl EditorHelper {
         }
     }
 
+    /// Completions for a database path argument of `cmd`, sorted and escaped.
     fn find_positional_args(&self, cmd: &str, prefix: &str) -> Vec<String> {
-        let cmd = if let Some(cmd) = self.cmds.get(cmd) {
-            cmd
-        } else {
+        let Some(cmd) = self.cmds.get(cmd) else {
             return Vec::new();
         };
-        let mut result = Vec::new();
-        if cmd
+        // only arguments that name an entry or group in the database
+        let takes_db_path = cmd
             .get_arguments()
-            .any(|arg| arg.is_positional() && arg.get_value_hint() == clap::ValueHint::Other)
-        {
-            // this is entry in keepass database
-            // get database entries here
-            let curr_dir = self.dir_stack.last().unwrap_or(&self.db_root);
-            if let Some(trie) = self.db_entries.get(curr_dir) {
-                let matches: Vec<String> = trie
-                    .search(Str::new(prefix).starts_with())
-                    .into_stream()
-                    .into_strs()
-                    .unwrap_or_default();
-                for item in matches {
-                    let suffix = &item[prefix.len()..];
-                    if suffix.is_empty() {
-                        continue;
-                    }
-                    let next_component = match suffix.find('/') {
-                        Some(idx) => &item[..prefix.len() + idx + 1],
-                        None => item.as_str(),
-                    };
-
-                    // 'cd' strictly accepts groups (which end with '/')
-                    if cmd.get_name() == "cd" && !next_component.ends_with('/') {
-                        continue;
-                    }
-
-                    result.push(escape(
-                        next_component.to_string(),
-                        ESC_CHAR,
-                        ESCAPED_CHARS,
-                        Quote::None,
-                    ));
-                }
-            }
+            .any(|arg| arg.is_positional() && arg.get_value_hint() == clap::ValueHint::Other);
+        if !takes_db_path {
+            return Vec::new();
         }
-        result.sort();
-        result.dedup();
-        result
+        let curr_dir = self.dir_stack.last().unwrap_or(&self.db_root);
+        let Some(trie) = self.db_entries.get(curr_dir) else {
+            return Vec::new();
+        };
+
+        // `cd` only accepts groups, which end with '/'
+        let groups_only = cmd.get_name() == "cd";
+        let matches = trie
+            .search(Str::new(prefix).starts_with())
+            .into_stream()
+            .into_strs()
+            .unwrap_or_default();
+        let completions: BTreeSet<String> = matches
+            .iter()
+            .filter_map(|item| next_component(item, prefix))
+            .filter(|completion| !groups_only || completion.ends_with('/'))
+            .map(|completion| escape(completion.to_string(), ESC_CHAR, ESCAPED_CHARS, Quote::None))
+            .collect();
+        completions.into_iter().collect()
     }
 
     /// Completion logic behind [`Completer::complete`], without rustyline's
@@ -237,6 +218,20 @@ impl EditorHelper {
             .map(clap::Arg::get_id)
             .collect()
     }
+}
+
+/// The completion offered for `item`, an index path that starts with
+/// `prefix`: `item` cut just after the first `/` past `prefix`, so each TAB
+/// goes one level deeper. `None` if nothing is left to complete.
+fn next_component<'a>(item: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = item.strip_prefix(prefix)?;
+    if rest.is_empty() {
+        return None;
+    }
+    Some(match rest.find('/') {
+        Some(slash) => &item[..prefix.len() + slash + 1],
+        None => item,
+    })
 }
 
 /// Escape character used in completions; `shlex::split` (used by
@@ -380,6 +375,31 @@ mod tests {
         // show inside Personal Docs/: completes nested entry with spaces escaped
         let show_pers = helper.find_positional_args("show", "Personal Docs/");
         assert_eq!(show_pers, vec!["Personal\\ Docs/ID\\ Card"]);
+    }
+
+    #[test]
+    fn test_next_component() {
+        // cut after the next `/`, one level per TAB
+        assert_eq!(next_component("General/", ""), Some("General/"));
+        assert_eq!(next_component("General/Finance/x", ""), Some("General/"));
+        assert_eq!(next_component("General/Finance/x", "Gen"), Some("General/"));
+        assert_eq!(
+            next_component("General/Finance/x", "General/"),
+            Some("General/Finance/")
+        );
+        assert_eq!(
+            next_component("General/Finance/x", "General/Finance/"),
+            Some("General/Finance/x")
+        );
+        // entries have no trailing `/`
+        assert_eq!(next_component("Notes", "No"), Some("Notes"));
+        // fully typed: nothing left to complete
+        assert_eq!(next_component("Notes", "Notes"), None);
+        assert_eq!(next_component("General/", "General/"), None);
+        // multi-byte names cut on character boundaries
+        assert_eq!(next_component("Ünï/çödé", "Ün"), Some("Ünï/"));
+        // not under the prefix at all
+        assert_eq!(next_component("Personal/", "Gen"), None);
     }
 
     #[test]

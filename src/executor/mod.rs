@@ -13,7 +13,7 @@ use keepass::{
     Database,
 };
 pub use state::get_all_prefixes_under_group;
-use state::State;
+use state::{Db, State};
 use totp_rs::TOTP;
 
 pub struct Executor {
@@ -38,104 +38,66 @@ impl Executor {
         self.state.db.as_ref().map(|db| &db.db)
     }
 
+    fn db(&self) -> Result<&Db, String> {
+        self.state
+            .db
+            .as_ref()
+            .ok_or_else(|| "Database not opened".to_string())
+    }
+
+    fn db_mut(&mut self) -> Result<&mut Db, String> {
+        self.state
+            .db
+            .as_mut()
+            .ok_or_else(|| "Database not opened".to_string())
+    }
+
+    /// The group or entry at `path`.
+    fn node(&self, path: &str) -> Result<NodeRef<'_>, String> {
+        self.db()?
+            .get_node(path)
+            .ok_or_else(|| format!("{} does not exist!", path))
+    }
+
+    /// The entry at `path`; a group there is an error.
+    fn entry(&self, path: &str) -> Result<&Entry, String> {
+        match self.db()?.get_node(path) {
+            Some(NodeRef::Entry(e)) => Ok(e),
+            Some(NodeRef::Group(_)) | None => {
+                Err(format!("{} is not an entry or doesn't exist!", path))
+            }
+        }
+    }
+
     pub fn execute(
         &mut self,
         command: Command,
         editor_helper: &mut EditorHelper,
     ) -> Result<(), String> {
         match command {
-            Command::ListDir { path } => {
-                let db = self
-                    .state
-                    .db
-                    .as_mut()
-                    .ok_or("Database not opened".to_string())?;
-                if let Some(node) = db.get_node(&path) {
-                    list_node(node);
-                    Ok(())
-                } else {
-                    Err(format!("{} does not exist!", path))
-                }
-            }
+            Command::ListDir { path } => self.node(&path).map(list_node),
             Command::ChangeDir { path } => {
-                let db = self
-                    .state
-                    .db
-                    .as_mut()
-                    .ok_or("Database not opened".to_string())?;
-                match db.change_current_group(&path) {
-                    false => Err(format!("{} is not a group or doesn't exist!", path)),
-                    true => {
-                        editor_helper.set_dir_stack(db.dir_stack.clone());
-                        Ok(())
-                    }
+                let db = self.db_mut()?;
+                if !db.change_current_group(&path) {
+                    return Err(format!("{} is not a group or doesn't exist!", path));
                 }
+                editor_helper.set_dir_stack(db.dir_stack.clone());
+                Ok(())
             }
             Command::Show {
                 show_hidden,
                 entry,
                 totp,
-            } => {
-                let db = self
-                    .state
-                    .db
-                    .as_mut()
-                    .ok_or("Database not opened".to_string())?;
-                if let Some(node) = db.get_node(&entry) {
-                    print_node(node, show_hidden, totp);
-                    Ok(())
-                } else {
-                    Err(format!("{} does not exist!", entry))
-                }
-            }
+            } => self
+                .node(&entry)
+                .map(|node| print_node(node, show_hidden, totp)),
             Command::CopyPassword { entry } => {
-                let db = self
-                    .state
-                    .db
-                    .as_mut()
-                    .ok_or("Database not opened".to_string())?;
-                match db.get_node(&entry) {
-                    Some(NodeRef::Group(_)) | None => {
-                        Err(format!("{} is not an entry or doesn't exist!", entry))
-                    }
-                    Some(NodeRef::Entry(e)) => {
-                        copy_entry_field(e, "Password");
-                        Ok(())
-                    }
-                }
+                self.entry(&entry).map(|e| copy_entry_field(e, "Password"))
             }
             Command::CopyUsername { entry } => {
-                let db = self
-                    .state
-                    .db
-                    .as_mut()
-                    .ok_or("Database not opened".to_string())?;
-                match db.get_node(&entry) {
-                    Some(NodeRef::Group(_)) | None => {
-                        Err(format!("{} is not an entry or doesn't exist!", entry))
-                    }
-                    Some(NodeRef::Entry(e)) => {
-                        copy_entry_field(e, "UserName");
-                        Ok(())
-                    }
-                }
+                self.entry(&entry).map(|e| copy_entry_field(e, "UserName"))
             }
-            Command::CopyURL { entry } => {
-                let db = self
-                    .state
-                    .db
-                    .as_mut()
-                    .ok_or("Database not opened".to_string())?;
-                match db.get_node(&entry) {
-                    Some(NodeRef::Group(_)) | None => {
-                        Err(format!("{} is not an entry or doesn't exist!", entry))
-                    }
-                    Some(NodeRef::Entry(e)) => {
-                        copy_entry_field(e, "URL");
-                        Ok(())
-                    }
-                }
-            }
+            Command::CopyURL { entry } => self.entry(&entry).map(|e| copy_entry_field(e, "URL")),
             Command::ClearClipboard => {
                 print_value_as_osc52(&[]);
                 Ok(())

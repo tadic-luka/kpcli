@@ -206,7 +206,7 @@ fn copy_entry_field(entry: &Entry, field_name: &str) {
 fn list_node(node: NodeRef<'_>) {
     match node {
         NodeRef::Entry(e) => {
-            let title = e.get_title().unwrap_or("(no title");
+            let title = e.get_title().unwrap_or("(no title)");
             println!("{}", title);
         }
         NodeRef::Group(g) => {
@@ -216,7 +216,7 @@ fn list_node(node: NodeRef<'_>) {
                         println!("{}/", g.name);
                     }
                     NodeRef::Entry(e) => {
-                        let title = e.get_title().unwrap_or("(no title");
+                        let title = e.get_title().unwrap_or("(no title)");
                         println!("{}", title);
                     }
                 }

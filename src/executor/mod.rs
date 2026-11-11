@@ -143,42 +143,37 @@ fn print_value_as_osc52(value: &[u8]) {
     println!("Done!");
 }
 
+/// Raw bytes of a field value, for copying.
+fn value_bytes(value: &Value) -> &[u8] {
+    match value {
+        Value::Unprotected(value) => value.as_bytes(),
+        Value::Protected(value) => value.unsecure(),
+        Value::Bytes(value) => value,
+    }
+}
+
 fn copy_entry_field(entry: &Entry, field_name: &str) {
     match entry.fields.get(field_name) {
-        Some(Value::Unprotected(value)) => {
-            print_value_as_osc52(value.as_bytes());
-        }
-        Some(Value::Protected(value)) => {
-            print_value_as_osc52(value.unsecure());
-        }
-        Some(Value::Bytes(value)) => {
-            print_value_as_osc52(value);
-        }
-        None => {
-            eprintln!("{} is not set!", field_name);
-        }
+        Some(value) => print_value_as_osc52(value_bytes(value)),
+        None => eprintln!("{} is not set!", field_name),
+    }
+}
+
+/// One line of `ls`: `name/` for a group, the title for an entry.
+fn print_node_name(node: NodeRef<'_>) {
+    match node {
+        NodeRef::Group(g) => println!("{}/", g.name),
+        NodeRef::Entry(e) => println!("{}", e.get_title().unwrap_or("(no title)")),
     }
 }
 
 fn list_node(node: NodeRef<'_>) {
     match node {
-        NodeRef::Entry(e) => {
-            let title = e.get_title().unwrap_or("(no title)");
-            println!("{}", title);
-        }
-        NodeRef::Group(g) => {
-            for node in &g.children {
-                match node.as_ref() {
-                    NodeRef::Group(g) => {
-                        println!("{}/", g.name);
-                    }
-                    NodeRef::Entry(e) => {
-                        let title = e.get_title().unwrap_or("(no title)");
-                        println!("{}", title);
-                    }
-                }
-            }
-        }
+        NodeRef::Entry(_) => print_node_name(node),
+        NodeRef::Group(g) => g
+            .children
+            .iter()
+            .for_each(|child| print_node_name(child.as_ref())),
     }
 }
 
@@ -201,73 +196,65 @@ fn print_totp(e: &Entry) {
     }
 }
 
-fn print_node(node: NodeRef<'_>, show_hidden: bool, totp: bool) {
-    const FIELD_NAME_WIDTH: usize = 15;
+/// Fields `show` always prints first, in this order, with the placeholder
+/// used when the entry doesn't have the field.
+const STANDARD_FIELDS: [(&str, &str); 4] = [
+    ("Title", "(no title)"),
+    ("UserName", "(no username)"),
+    ("Password", "(no password)"),
+    ("URL", "(no url)"),
+];
 
-    fn get_value(val: &Value, show_hidden: bool) -> &str {
-        match val {
-            Value::Bytes(_) => "(bytes)",
-            Value::Unprotected(val) => val,
-            Value::Protected(val) => {
-                if show_hidden {
-                    let val = std::str::from_utf8(val.unsecure()).unwrap_or("");
-                    val
-                } else {
-                    "*** SECRET ***"
-                }
-            }
+/// A field value as `show` displays it. Protected values are masked unless
+/// `show_hidden` is set.
+fn display_value(value: &Value, show_hidden: bool) -> &str {
+    match value {
+        Value::Bytes(_) => "(bytes)",
+        Value::Unprotected(value) => value,
+        Value::Protected(value) if show_hidden => {
+            std::str::from_utf8(value.unsecure()).unwrap_or("")
         }
+        Value::Protected(_) => "*** SECRET ***",
+    }
+}
+
+/// The text `show` prints for an entry: the standard fields, then every
+/// other field sorted by name. With `show_hidden`, an `otp` field is
+/// preceded by the current code.
+fn format_entry(e: &Entry, show_hidden: bool) -> String {
+    const FIELD_NAME_WIDTH: usize = 15;
+    let mut out = String::new();
+    let mut line = |name: &str, value: &str| {
+        out.push_str(&format!("{:>FIELD_NAME_WIDTH$}: {}\n", name, value));
+    };
+
+    for (name, placeholder) in STANDARD_FIELDS {
+        let value = e.fields.get(name);
+        let value = value.map_or(placeholder, |v| display_value(v, show_hidden));
+        line(name, value);
     }
 
-    match node {
-        NodeRef::Entry(e) => {
-            if totp {
-                print_totp(e);
-                return;
-            }
-            let title = e
-                .fields
-                .get("Title")
-                .map(|val| get_value(val, show_hidden))
-                .unwrap_or("(no title)");
-            let username = e
-                .fields
-                .get("UserName")
-                .map(|val| get_value(val, show_hidden))
-                .unwrap_or("(no username)");
-            let password = e
-                .fields
-                .get("Password")
-                .map(|val| get_value(val, show_hidden))
-                .unwrap_or("(no password)");
-            println!("{:>FIELD_NAME_WIDTH$}: {}", "Title", title);
-            println!("{:>FIELD_NAME_WIDTH$}: {}", "UserName", username);
-            println!("{:>FIELD_NAME_WIDTH$}: {}", "Password", password);
+    let mut other: Vec<_> = e
+        .fields
+        .iter()
+        .filter(|(name, _)| !STANDARD_FIELDS.iter().any(|(standard, _)| standard == name))
+        .collect();
+    other.sort_by(|a, b| a.0.cmp(b.0));
+    for (name, value) in other {
+        if name == "otp" && show_hidden {
+            line("otp code", &get_totp(e).unwrap_or_else(|err| err));
+        }
+        line(name, display_value(value, show_hidden));
+    }
+    out
+}
 
-            for (field_name, field_value) in &e.fields {
-                if field_name == "otp" && show_hidden {
-                    let val = match get_totp(e) {
-                        Ok(val) => val,
-                        Err(err) => err,
-                    };
-                    println!("{:>FIELD_NAME_WIDTH$}: {}", "otp code", val);
-                }
-                if field_name != "Title" && field_name != "UserName" && field_name != "Password" {
-                    println!(
-                        "{:>FIELD_NAME_WIDTH$}: {}",
-                        field_name,
-                        get_value(field_value, show_hidden),
-                    );
-                }
-            }
-        }
-        NodeRef::Group(_) => {
-            if totp {
-                eprintln!("Can't show totp for group!");
-            } else {
-                println!();
-            }
-        }
+fn print_node(node: NodeRef<'_>, show_hidden: bool, totp: bool) {
+    match (node, totp) {
+        (NodeRef::Entry(e), true) => print_totp(e),
+        (NodeRef::Entry(e), false) => print!("{}", format_entry(e, show_hidden)),
+        (NodeRef::Group(_), true) => eprintln!("Can't show totp for group!"),
+        (NodeRef::Group(_), false) => println!(),
     }
 }
 
@@ -455,5 +442,96 @@ mod tests {
         let bad = entry(&[("otp", "not a url")]);
         let err = get_totp(&bad).unwrap_err();
         assert!(err.starts_with("Error generating totp"), "{err}");
+    }
+
+    /// `format_entry` output as (name, value) pairs, one per line.
+    fn entry_lines(e: &Entry, show_hidden: bool) -> Vec<(String, String)> {
+        format_entry(e, show_hidden)
+            .lines()
+            .map(|line| {
+                let (name, value) = line.split_once(": ").unwrap();
+                (name.trim_start().to_string(), value.to_string())
+            })
+            .collect()
+    }
+
+    fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+        expected
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_show_field_order() {
+        let mut e = entry(&[
+            ("zeta", "last"),
+            ("URL", "https://bank.example"),
+            ("Notes", "pin is 1234"),
+            ("Password", "secret"),
+            ("Title", "Bank"),
+            ("alpha", "first"),
+            ("UserName", "alice"),
+        ]);
+        e.fields
+            .insert("Bytes".to_string(), Value::Bytes(vec![1, 2, 3]));
+        let expected = pairs(&[
+            ("Title", "Bank"),
+            ("UserName", "alice"),
+            ("Password", "secret"),
+            ("URL", "https://bank.example"),
+            ("Bytes", "(bytes)"),
+            ("Notes", "pin is 1234"),
+            ("alpha", "first"),
+            ("zeta", "last"),
+        ]);
+        // the same on every run, despite fields being a HashMap
+        for _ in 0..10 {
+            assert_eq!(entry_lines(&e, false), expected);
+        }
+    }
+
+    #[test]
+    fn test_show_placeholders_for_missing_standard_fields() {
+        assert_eq!(
+            entry_lines(&entry(&[("Notes", "n")]), false),
+            pairs(&[
+                ("Title", "(no title)"),
+                ("UserName", "(no username)"),
+                ("Password", "(no password)"),
+                ("URL", "(no url)"),
+                ("Notes", "n"),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_show_hidden_values() {
+        let mut e = entry(&[("Title", "Bank")]);
+        e.fields.insert(
+            "Password".to_string(),
+            Value::Protected("secret".to_string().into()),
+        );
+        e.fields.insert(
+            "otp".to_string(),
+            Value::Protected(
+                "otpauth://totp/T:a?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP"
+                    .to_string()
+                    .into(),
+            ),
+        );
+
+        let masked = entry_lines(&e, false);
+        assert_eq!(masked[2], pairs(&[("Password", "*** SECRET ***")])[0]);
+        // no otp code line without show_hidden
+        assert_eq!(masked[4..], pairs(&[("otp", "*** SECRET ***")]));
+
+        let shown = entry_lines(&e, true);
+        assert_eq!(shown[2], pairs(&[("Password", "secret")])[0]);
+        // the otp code comes right before the otp field
+        assert_eq!(shown[4].0, "otp code");
+        assert_eq!(shown[4].1.len(), 6, "{:?}", shown[4]);
+        assert!(shown[5].1.starts_with("otpauth://"), "{:?}", shown[5]);
+        assert_eq!(shown.len(), 6);
     }
 }

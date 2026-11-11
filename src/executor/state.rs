@@ -30,18 +30,21 @@ impl Db {
         }
     }
 
-    pub fn find_group(&self, uuid: Uuid) -> Option<&Group> {
-        self.db.root.iter().find_map(|n| match n {
-            NodeRef::Group(g) if g.uuid == uuid => Some(g),
-            _ => None,
-        })
+    pub fn get_current_group(&self) -> &Group {
+        self.current_chain()
+            .and_then(|chain| chain.last().copied())
+            .expect("dir_stack only holds groups that exist")
     }
 
-    pub fn get_current_group(&self) -> &Group {
-        match self.dir_stack.last() {
-            None => &self.db.root,
-            Some(value) => self.find_group(*value).unwrap(),
+    /// The groups from the root down to the current group, following
+    /// `dir_stack` one level at a time.
+    fn current_chain(&self) -> Option<Vec<&Group>> {
+        let mut chain = vec![&self.db.root];
+        for uuid in &self.dir_stack {
+            let child = child_group(chain.last()?, |g| g.uuid == *uuid)?;
+            chain.push(child);
         }
+        Some(chain)
     }
 
     pub fn change_current_group(&mut self, path: &str) -> bool {
@@ -77,45 +80,41 @@ impl Db {
     /// (staying at the root). The last component matches the first child with
     /// that group name or entry title; earlier components must name a group.
     fn walk(&self, path: &str) -> Option<(Vec<&Group>, Option<&Entry>)> {
-        let mut groups = vec![&self.db.root];
-        if !path.starts_with('/') {
-            for uuid in &self.dir_stack {
-                let child = groups.last()?.children.iter().find_map(|n| match n {
-                    Node::Group(g) if g.uuid == *uuid => Some(g),
-                    _ => None,
-                })?;
-                groups.push(child);
-            }
-        }
+        let mut groups = if path.starts_with('/') {
+            vec![&self.db.root]
+        } else {
+            self.current_chain()?
+        };
 
         let components: Vec<&str> = path
             .split('/')
             .filter(|c| !c.is_empty() && *c != ".")
             .collect();
         for (i, component) in components.iter().enumerate() {
+            let current = *groups.last()?;
             if *component == ".." {
                 if groups.len() > 1 {
                     groups.pop();
                 }
-                continue;
-            }
-            let is_last = i + 1 == components.len();
-            let current = *groups.last()?;
-            if is_last {
+            } else if i + 1 < components.len() {
+                groups.push(child_group(current, |g| g.name == *component)?);
+            } else {
                 match current.get(&[component])? {
                     NodeRef::Group(g) => groups.push(g),
                     NodeRef::Entry(e) => return Some((groups, Some(e))),
                 }
-            } else {
-                let child = current.children.iter().find_map(|n| match n {
-                    Node::Group(g) if g.name == *component => Some(g),
-                    _ => None,
-                })?;
-                groups.push(child);
             }
         }
         Some((groups, None))
     }
+}
+
+/// The first child group of `group` that `matches` accepts.
+fn child_group(group: &Group, matches: impl Fn(&Group) -> bool) -> Option<&Group> {
+    group.children.iter().find_map(|n| match n {
+        Node::Group(g) if matches(g) => Some(g),
+        _ => None,
+    })
 }
 
 /// Whether a node with this name can be addressed by a `/`-separated path.

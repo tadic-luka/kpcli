@@ -197,8 +197,10 @@ impl EditorHelper {
             None => return (0, Vec::new()),
         };
 
-        if pos <= cmd.len() {
-            return (0, self.find_cmds_starting_with(cmd));
+        // the command may be preceded by whitespace
+        let cmd_start = line.len() - line.trim_start().len();
+        if pos <= cmd_start + cmd.len() {
+            return (cmd_start, self.find_cmds_starting_with(cmd));
         }
 
         let (arg_start, raw_arg) = extract_word(line, pos, ESC_CHAR, WORD_BREAKS);
@@ -609,10 +611,25 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "known bug: command-name completion assumes the command starts at byte 0"]
     fn test_complete_command_name_after_leading_whitespace() {
-        let helper = EditorHelper::new();
+        let helper = helper_with_entries();
         assert_eq!(complete_end(&helper, "  sh"), (2, vec!["show".to_string()]));
+        assert_eq!(complete_end(&helper, "\tcd"), (1, vec!["cd".to_string()]));
+        // arguments after an indented command still complete
+        assert_eq!(
+            complete_end(&helper, "  show -"),
+            (
+                8,
+                vec!["s", "t", "-totp"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect()
+            )
+        );
+        assert_eq!(
+            complete_end(&helper, "  show Gen"),
+            (7, vec!["General/".to_string()])
+        );
     }
 
     #[test]

@@ -252,6 +252,105 @@ mod tests {
         assert!(db.dir_stack.is_empty());
     }
 
+    /// Root
+    /// ├── General/
+    /// │   ├── Finance/
+    /// │   └── Notes
+    /// └── Personal/
+    fn sample_db() -> Db {
+        let mut general = Group::new("General");
+        general.children.push(Node::Group(Group::new("Finance")));
+        general.children.push(Node::Entry(titled_entry("Notes")));
+        let mut database = Database::new(Default::default());
+        database.root.children.push(Node::Group(general));
+        let personal = Group::new("Personal");
+        database.root.children.push(Node::Group(personal));
+        Db::new(database)
+    }
+
+    #[test]
+    fn test_change_group_to_parent() {
+        let mut db = sample_db();
+
+        assert!(db.change_current_group("General/Finance"));
+        assert!(db.change_current_group(".."));
+        assert_eq!(db.get_current_group().name, "General");
+        assert!(db.change_current_group(".."));
+        assert!(db.dir_stack.is_empty());
+
+        // `..` at root stays at root
+        assert!(db.change_current_group(".."));
+        assert!(db.dir_stack.is_empty());
+        assert!(db.change_current_group("../../General"));
+        assert_eq!(db.get_current_group().name, "General");
+
+        // `..` in the middle of a path
+        assert!(db.change_current_group("/General/Finance/../../Personal"));
+        assert_eq!(db.get_current_group().name, "Personal");
+        assert_eq!(db.dir_stack.len(), 1);
+    }
+
+    #[test]
+    fn test_change_group_failures_leave_stack_unchanged() {
+        let mut db = sample_db();
+        assert!(db.change_current_group("General"));
+        let before = db.dir_stack.clone();
+
+        // an entry is not a group
+        assert!(!db.change_current_group("Notes"));
+        assert_eq!(db.dir_stack, before);
+        // fails part way, after `..` already popped
+        assert!(!db.change_current_group("../Missing"));
+        assert_eq!(db.dir_stack, before);
+        // fails part way, after a group was already pushed
+        assert!(!db.change_current_group("Finance/Missing"));
+        assert_eq!(db.dir_stack, before);
+    }
+
+    #[test]
+    fn test_get_node_relative_paths() {
+        let mut db = sample_db();
+        assert!(db.change_current_group("General"));
+        let current = db.get_current_group();
+
+        assert!(matches!(
+            db.get_node(current, "Notes"),
+            Some(NodeRef::Entry(_))
+        ));
+        assert!(matches!(
+            db.get_node(current, "./Finance/"),
+            Some(NodeRef::Group(g)) if g.name == "Finance"
+        ));
+        // empty path is the group itself
+        assert!(matches!(
+            db.get_node(current, ""),
+            Some(NodeRef::Group(g)) if g.name == "General"
+        ));
+        assert!(db.get_node(current, "Missing").is_none());
+        assert!(db.get_node(current, "Notes/Deeper").is_none());
+    }
+
+    #[test]
+    #[ignore = "known bug: get_node treats `..` as a literal name, so `ls ..` and `show ../X` fail"]
+    fn test_get_node_parent_paths() {
+        let mut db = sample_db();
+        assert!(db.change_current_group("General/Finance"));
+        let current = db.get_current_group();
+
+        assert!(matches!(
+            db.get_node(current, "../Notes"),
+            Some(NodeRef::Entry(_))
+        ));
+        assert!(matches!(
+            db.get_node(current, "../../Personal"),
+            Some(NodeRef::Group(g)) if g.name == "Personal"
+        ));
+        assert!(matches!(
+            db.get_node(current, ".."),
+            Some(NodeRef::Group(g)) if g.name == "General"
+        ));
+    }
+
     #[test]
     fn test_node_path_resolution_with_trailing_slashes() {
         let mut root = Group::new("Root");

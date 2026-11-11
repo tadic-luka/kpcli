@@ -313,3 +313,180 @@ fn print_node(node: NodeRef<'_>, show_hidden: bool, totp: bool) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keepass::db::{Group, Node};
+
+    fn entry(fields: &[(&str, &str)]) -> Entry {
+        let mut e = Entry::new();
+        for (name, value) in fields {
+            e.fields
+                .insert(name.to_string(), Value::Unprotected(value.to_string()));
+        }
+        e
+    }
+
+    /// Root
+    /// └── General/
+    ///     ├── Finance/
+    ///     ├── Notes        (title, username, password, URL)
+    ///     └── Bare         (title only)
+    fn sample_executor() -> Executor {
+        let mut general = Group::new("General");
+        general.children.push(Node::Group(Group::new("Finance")));
+        general.children.push(Node::Entry(entry(&[
+            ("Title", "Notes"),
+            ("UserName", "alice"),
+            ("Password", "secret"),
+            ("URL", "https://example.com"),
+        ])));
+        general
+            .children
+            .push(Node::Entry(entry(&[("Title", "Bare")])));
+        let mut database = Database::new(Default::default());
+        database.root.children.push(Node::Group(general));
+        Executor::new(Some(database))
+    }
+
+    /// Parse `line` like the REPL does, then execute it.
+    fn run(executor: &mut Executor, line: &str) -> Result<(), String> {
+        let cmd = Command::try_parse(line).unwrap_or_else(|err| panic!("{line:?}: {err}"));
+        executor.execute(cmd, &mut EditorHelper::new())
+    }
+
+    fn dir_depth(executor: &Executor) -> usize {
+        executor.state.db.as_ref().unwrap().dir_stack.len()
+    }
+
+    #[test]
+    fn test_commands_need_an_open_db() {
+        let mut executor = Executor::new(None);
+        for line in [
+            "ls",
+            "ls General",
+            "cd General",
+            "show General/Notes",
+            "cp General/Notes",
+            "cu General/Notes",
+            "cw General/Notes",
+        ] {
+            assert_eq!(
+                run(&mut executor, line),
+                Err("Database not opened".to_string()),
+                "{line}"
+            );
+        }
+        assert_eq!(
+            run(&mut executor, "close"),
+            Err("No database opened!".to_string())
+        );
+        // clearing the clipboard doesn't need a database
+        assert_eq!(run(&mut executor, "cx"), Ok(()));
+    }
+
+    #[test]
+    fn test_list_and_show() {
+        let mut executor = sample_executor();
+        for line in [
+            "ls",
+            "ls General",
+            "ls General/",
+            "ls /General/Notes",
+            "show General/Notes",
+            "show -s General/Notes",
+            "show General",
+            // `-t` on an entry without totp prints an error but still succeeds
+            "show -t General/Notes",
+        ] {
+            assert_eq!(run(&mut executor, line), Ok(()), "{line}");
+        }
+        assert_eq!(
+            run(&mut executor, "ls Missing"),
+            Err("Missing does not exist!".to_string())
+        );
+        assert_eq!(
+            run(&mut executor, "show General/Missing"),
+            Err("General/Missing does not exist!".to_string())
+        );
+    }
+
+    #[test]
+    fn test_copy_commands() {
+        let mut executor = sample_executor();
+        for cmd in ["cp", "cu", "cw"] {
+            assert_eq!(run(&mut executor, &format!("{cmd} General/Notes")), Ok(()));
+            // an unset field prints an error but still succeeds
+            assert_eq!(run(&mut executor, &format!("{cmd} General/Bare")), Ok(()));
+            // groups and missing paths are errors (exact text is a known bug,
+            // it says "is not a group" for an entry target)
+            assert!(run(&mut executor, &format!("{cmd} General")).is_err());
+            assert!(run(&mut executor, &format!("{cmd} General/Missing")).is_err());
+        }
+    }
+
+    #[test]
+    fn test_change_dir() {
+        let mut executor = sample_executor();
+        assert_eq!(run(&mut executor, "cd General"), Ok(()));
+        assert_eq!(executor.get_current_group_name(), Some("General"));
+        assert_eq!(dir_depth(&executor), 1);
+
+        // relative to the current group
+        assert_eq!(run(&mut executor, "show Notes"), Ok(()));
+
+        assert_eq!(
+            run(&mut executor, "cd Notes"),
+            Err("Notes is not a group or doesn't exist!".to_string())
+        );
+        assert!(run(&mut executor, "cd Missing").is_err());
+        assert_eq!(executor.get_current_group_name(), Some("General"));
+
+        assert_eq!(run(&mut executor, "cd Finance"), Ok(()));
+        assert_eq!(dir_depth(&executor), 2);
+        assert_eq!(run(&mut executor, "cd .."), Ok(()));
+        assert_eq!(dir_depth(&executor), 1);
+        assert_eq!(run(&mut executor, "cd"), Ok(()));
+        assert_eq!(dir_depth(&executor), 0);
+    }
+
+    #[test]
+    fn test_open_and_close() {
+        let mut executor = sample_executor();
+        assert_eq!(
+            run(&mut executor, "open some.kdbx pw"),
+            Err("Database already opened!".to_string())
+        );
+        assert_eq!(run(&mut executor, "close"), Ok(()));
+        assert_eq!(executor.get_db().map(|_| ()), None);
+        assert_eq!(
+            run(&mut executor, "ls"),
+            Err("Database not opened".to_string())
+        );
+
+        // opening a file that doesn't exist fails and leaves no db open
+        assert!(run(&mut executor, "open /nonexistent/kpcli-test.kdbx pw").is_err());
+        assert!(executor.get_db().is_none());
+    }
+
+    #[test]
+    fn test_get_totp() {
+        assert_eq!(
+            get_totp(&entry(&[("Title", "x")])),
+            Err("Entry does not have totp!".to_string())
+        );
+
+        let e = entry(&[(
+            "otp",
+            "otpauth://totp/Test:alice?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Test",
+        )]);
+        let code = get_totp(&e).unwrap();
+        assert_eq!(code.len(), 6, "{code}");
+        assert!(code.chars().all(|c| c.is_ascii_digit()), "{code}");
+
+        let bad = entry(&[("otp", "not a url")]);
+        let err = get_totp(&bad).unwrap_err();
+        assert!(err.starts_with("Error generating totp"), "{err}");
+    }
+}
